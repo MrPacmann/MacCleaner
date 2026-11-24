@@ -148,6 +148,8 @@ final class L10n {
         "trash.denied": "macOS не даёт приложению читать содержимое Корзины — система её защищает. Очистить Корзину можно кнопкой ниже (она работает через Finder).",
         "trash.emptyBtn": "Очистить корзину…", "trash.clear": "Очистить",
         "hist.freed": "освобождено всего", "hist.runs": "очисток",
+        "hist.freeChart": "Свободное место", "hist.growth": "С прошлого сканирования",
+        "hist.growthUp": "выросло", "hist.growthDown": "уменьшилось",
         "hist.items": "элементов в Корзине", "hist.row": "%d элем. — в Корзине",
         "hist.note": "Файлы можно восстановить из Корзины, пока она не очищена.",
         "hist.empty.t": "Пока пусто", "hist.empty.s": "Здесь появятся записи после первой очистки.",
@@ -306,6 +308,8 @@ final class L10n {
         "trash.denied": "macOS protects the Trash from apps. You can still empty it with the button below (works via Finder).",
         "trash.emptyBtn": "Empty Trash…", "trash.clear": "Empty",
         "hist.freed": "total freed", "hist.runs": "cleanups",
+        "hist.freeChart": "Free space", "hist.growth": "Since last scan",
+        "hist.growthUp": "grew", "hist.growthDown": "shrank",
         "hist.items": "items in Trash", "hist.row": "%d items — in Trash",
         "hist.note": "Files can be restored from the Trash until it's emptied.",
         "hist.empty.t": "Nothing yet", "hist.empty.s": "Records will appear after your first cleanup.",
@@ -546,6 +550,26 @@ struct HistoryEntry: Codable, Identifiable {
     let paths: [String]
 }
 
+// MARK: - Снапшоты состояния диска (график «свободно» и «Что выросло»)
+
+/// Пишется после каждого успешного глубокого сканирования.
+struct DiskSnapshot: Codable, Identifiable {
+    var id: Date { date }
+    let date: Date
+    let free: UInt64
+    let total: UInt64
+    /// Размеры по категориям; ключ — rawValue FileCategory (стабилен, не зависит от языка)
+    let byCategory: [String: UInt64]
+}
+
+/// Разница по категории между двумя последними снапшотами («Что выросло»)
+struct CategoryGrowth: Identifiable {
+    var id: String { category.rawValue }
+    let category: FileCategory
+    /// Положительная — категория выросла, отрицательная — уменьшилась
+    let delta: Int64
+}
+
 // MARK: - Разделы сайдбара
 
 enum AppSection: String, CaseIterable, Identifiable {
@@ -687,6 +711,22 @@ final class CleanerViewModel {
     var appsState = AppsState()
     var startup = StartupState()
     var history: [HistoryEntry] = []
+    /// Снапшоты диска по итогам сканирований (старые — первые)
+    var snapshots: [DiskSnapshot] = []
+
+    /// «Что выросло»: разница категорий между двумя последними снапшотами,
+    /// отсортирована по модулю изменения (самые заметные — первые)
+    var growth: [CategoryGrowth] {
+        guard snapshots.count >= 2 else { return [] }
+        let last = snapshots[snapshots.count - 1]
+        let prev = snapshots[snapshots.count - 2]
+        return FileCategory.allCases.compactMap { cat in
+            let d = Int64(last.byCategory[cat.rawValue] ?? 0)
+                  - Int64(prev.byCategory[cat.rawValue] ?? 0)
+            return d == 0 ? nil : CategoryGrowth(category: cat, delta: d)
+        }
+        .sorted { abs($0.delta) > abs($1.delta) }
+    }
 
     var selected: Set<String> = []
     var sizeIndex: [String: UInt64] = [:]   // path → size, для подсчёта выбранного
@@ -767,6 +807,7 @@ final class CleanerViewModel {
             disk.folderSizes = result.folderSizes
             disk.finishedAt = Date()
             disk.phase = .done
+            appendSnapshot()
             index(result.large)
             index(result.dupeCandidates)
             index(result.topFolders)
@@ -908,6 +949,7 @@ final class CleanerViewModel {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         history = (try? dec.decode([HistoryEntry].self, from: data)) ?? []
+        loadSnapshots()
     }
 
     private func appendHistory(count: Int, bytes: UInt64, paths: [String]) {
@@ -917,6 +959,42 @@ final class CleanerViewModel {
         if let data = try? enc.encode(history) {
             try? data.write(to: historyURL)
         }
+    }
+
+    // MARK: Снапшоты диска
+
+    private var snapshotsURL: URL {
+        historyURL.deletingLastPathComponent().appendingPathComponent("snapshots.json")
+    }
+
+    /// Снапшот после успешного сканирования. Если прошлый младше 5 минут —
+    /// заменяем его, чтобы случайный двойной скан подряд не засорял график.
+    private func appendSnapshot() {
+        var cats: [String: UInt64] = [:]
+        for (cat, bytes) in disk.byCategory { cats[cat.rawValue] = bytes }
+        let snap = DiskSnapshot(date: Date(), free: disk.volumeFree,
+                                total: disk.volumeTotal, byCategory: cats)
+        if let last = snapshots.last,
+           Date().timeIntervalSince(last.date) < 5 * 60 {
+            snapshots[snapshots.count - 1] = snap
+        } else {
+            snapshots.append(snap)
+        }
+        if snapshots.count > 200 {
+            snapshots.removeFirst(snapshots.count - 200)
+        }
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(snapshots) {
+            try? data.write(to: snapshotsURL)
+        }
+    }
+
+    private func loadSnapshots() {
+        guard let data = try? Data(contentsOf: snapshotsURL) else { return }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        snapshots = (try? dec.decode([DiskSnapshot].self, from: data)) ?? []
     }
 
     // MARK: Тост
@@ -936,6 +1014,12 @@ enum Format {
     static func bytes(_ value: UInt64) -> String {
         if value == 0 { return "0 Б" }
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+    /// Со знаком: «+1,2 ГБ» / «−300 МБ» (для «Что выросло»)
+    static func signedBytes(_ value: Int64) -> String {
+        if value == 0 { return "0" }
+        let absStr = ByteCountFormatter.string(fromByteCount: abs(value), countStyle: .file)
+        return (value > 0 ? "+" : "−") + absStr
     }
     static func date(_ date: Date?) -> String {
         guard let date else { return "" }

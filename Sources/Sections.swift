@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Charts
 
 // MARK: - Общие мелкие элементы списков
 
@@ -1366,6 +1367,16 @@ struct HistoryView: View {
                 PageHeader(title: L10n.shared.t("sec.history"),
                            subtitle: L10n.shared.t("sub.history"))
 
+                // График свободного места по снапшотам сканирований
+                if model.snapshots.count >= 2 {
+                    FreeSpaceChart(snapshots: model.snapshots)
+                }
+
+                // «Что выросло» — разница с прошлым сканированием
+                if !model.growth.isEmpty {
+                    GrowthCard(rows: model.growth)
+                }
+
                 if model.history.isEmpty {
                     EmptyState(icon: "clock", iconColor: Theme.accent, title: L10n.shared.t("hist.empty.t"),
                                subtitle: L10n.shared.t("hist.empty.s"))
@@ -1418,6 +1429,86 @@ struct HistoryView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - График свободного места (по снапшотам сканирований)
+
+struct FreeSpaceChart: View {
+    let snapshots: [DiskSnapshot]
+
+    var gbUnit: String { L10n.shared.lang == "en" ? "GB" : "ГБ" }
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(L10n.shared.t("hist.freeChart"), systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.callout.weight(.semibold))
+                Chart(snapshots) { snap in
+                    AreaMark(
+                        x: .value("date", snap.date),
+                        y: .value("gb", Double(snap.free) / 1_000_000_000)
+                    )
+                    .foregroundStyle(Theme.accentGradient.opacity(0.22))
+                    .interpolationMethod(.catmullRom)
+                    LineMark(
+                        x: .value("date", snap.date),
+                        y: .value("gb", Double(snap.free) / 1_000_000_000)
+                    )
+                    .foregroundStyle(Theme.accent)
+                    .interpolationMethod(.catmullRom)
+                    PointMark(
+                        x: .value("date", snap.date),
+                        y: .value("gb", Double(snap.free) / 1_000_000_000)
+                    )
+                    .foregroundStyle(Theme.accent)
+                    .symbolSize(24)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let gb = value.as(Double.self) {
+                                Text("\(Int(gb.rounded())) \(gbUnit)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 170)
+            }
+            .padding(16)
+        }
+    }
+}
+
+// MARK: - «Что выросло» — разница категорий с прошлого сканирования
+
+struct GrowthCard: View {
+    let rows: [CategoryGrowth]
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(L10n.shared.t("hist.growth"), systemImage: "arrow.up.arrow.down")
+                    .font(.callout.weight(.semibold))
+                ForEach(rows.prefix(5)) { row in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(row.category.color)
+                            .frame(width: 8, height: 8)
+                        Text(L10n.shared.t(row.category.titleKey))
+                            .font(.callout)
+                        Spacer()
+                        Text(Format.signedBytes(row.delta))
+                            .font(.callout.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(row.delta > 0 ? Theme.danger : Theme.success)
+                    }
+                }
+            }
+            .padding(16)
+        }
     }
 }
 
