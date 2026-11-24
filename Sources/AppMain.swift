@@ -38,6 +38,7 @@ struct MacCleanerApp: App {
 
 struct ContentView: View {
     @Environment(CleanerViewModel.self) private var model
+    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingDone")
 
     var body: some View {
         HStack(spacing: 0) {
@@ -71,6 +72,15 @@ struct ContentView: View {
         .background(Theme.bg)
         .background(WindowAccessor())
         .overlay {
+            if showOnboarding {
+                DialogScrim {
+                    OnboardingCard {
+                        UserDefaults.standard.set(true, forKey: "onboardingDone")
+                        withAnimation(.easeOut(duration: 0.2)) { showOnboarding = false }
+                    }
+                }
+                .transition(.opacity)
+            }
             if model.showTrashConfirm {
                 DialogScrim {
                     ConfirmDialog(
