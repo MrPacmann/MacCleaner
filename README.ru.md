@@ -10,7 +10,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="Лицензия"></a>
   </p>
 
-  <p><a href="README.md">English</a> · <b>Русский</b></p>
+  <p><a href="README.md">English</a> · <b>Русский</b> · <a href="ROADMAP.ru.md">Roadmap</a></p>
 </div>
 
 ---
