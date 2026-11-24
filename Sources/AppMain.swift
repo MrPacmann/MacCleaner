@@ -13,6 +13,7 @@ struct MacCleanerApp: App {
                 .preferredColorScheme(model.colorScheme)
                 .task {
                     model.loadHistory()
+                    MenuBarController.shared.apply(enabled: model.menuBarEnabled)
                     Task { await UpdateChecker.shared.check(silent: true) }
                 }
         }
@@ -68,6 +69,7 @@ struct ContentView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
+        .background(WindowAccessor())
         .overlay {
             if model.showTrashConfirm {
                 DialogScrim {

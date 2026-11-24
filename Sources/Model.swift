@@ -72,6 +72,10 @@ final class L10n {
         "settings.installAppDesc": "Запуск из Launchpad и автообновления",
         "settings.installFailed": "Не удалось — перетащите вручную",
         "btn.install": "Установить",
+        "settings.menuBar": "Иконка в меню-баре",
+        "menubar.free": "Свободно %@ из %@",
+        "menubar.open": "Открыть Mac Cleaner",
+        "menubar.quit": "Выйти",
         "settings.version": "Версия", "settings.about": "О приложении",
         "settings.author": "Автор", "settings.authorName": "Stepan Trushin",
         "status.scanning": "Сканирую… %d файлов", "status.today": "Обновлено сегодня, %@",
@@ -240,6 +244,10 @@ final class L10n {
         "settings.installAppDesc": "Launch from Launchpad and auto-update",
         "settings.installFailed": "Failed — drag it manually",
         "btn.install": "Install",
+        "settings.menuBar": "Menu bar icon",
+        "menubar.free": "%@ free of %@",
+        "menubar.open": "Open Mac Cleaner",
+        "menubar.quit": "Quit",
         "settings.version": "Version", "settings.about": "About",
         "settings.author": "Author", "settings.authorName": "Stepan Trushin",
         "status.scanning": "Scanning… %d files", "status.today": "Updated today at %@",
@@ -669,6 +677,13 @@ enum AppSection: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class CleanerViewModel {
+    /// Доступ из App Intents (Shortcuts) к запущенной модели
+    static weak var shared: CleanerViewModel?
+
+    init() {
+        CleanerViewModel.shared = self
+    }
+
     var section: AppSection = .overview
     /// Счётчик запросов фокуса на поле поиска (Cmd+F): поле следит и берёт фокус
     var searchFocusRequest: Int = 0
@@ -679,6 +694,14 @@ final class CleanerViewModel {
     var theme: String = UserDefaults.standard.string(forKey: "appTheme") ?? "dark" {
         didSet {
             UserDefaults.standard.set(theme, forKey: "appTheme")
+        }
+    }
+
+    /// Иконка со свободным местом в меню-баре (по умолчанию включена)
+    var menuBarEnabled: Bool = UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(menuBarEnabled, forKey: "menuBarEnabled")
+            MenuBarController.shared.apply(enabled: menuBarEnabled)
         }
     }
 

@@ -1552,6 +1552,17 @@ struct SettingsView: View {
                             LanguageSwitcher()
                                 .frame(width: 220)
                         }
+                        Divider()
+                        HStack {
+                            Text(L10n.shared.t("settings.menuBar"))
+                                .font(.callout).foregroundStyle(.secondary)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { model.menuBarEnabled },
+                                set: { model.menuBarEnabled = $0 }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
                     }
                     .padding(16)
                 }
