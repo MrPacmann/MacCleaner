@@ -40,7 +40,7 @@ open build/MacCleaner.app
 
 ## Готовая сборка
 
-Скачайте `MacCleaner-1.0.dmg` из [последнего релиза](https://github.com/MrPacmann/MacCleaner/releases/latest), откройте его и перетащите MacCleaner в папку Applications.
+Скачайте DMG из [последнего релиза](https://github.com/MrPacmann/MacCleaner/releases/latest), откройте его и перетащите MacCleaner в папку Applications.
 
 Приложение подписано ad-hoc, поэтому при первом запуске: правый клик → «Открыть».
 
