@@ -137,8 +137,8 @@ function setLang(lang) {
   document.getElementById('btn-ru').classList.toggle('on', lang === 'ru');
   localStorage.setItem('mc-lang', lang);
 }
-setLang(localStorage.getItem('mc-lang') ||
-        (navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en');
+const saved = localStorage.getItem('mc-lang');
+setLang(saved || ((navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en'));
 </script>
 </body>
 </html>
