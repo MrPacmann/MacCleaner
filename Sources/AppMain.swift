@@ -19,6 +19,19 @@ struct MacCleanerApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 700)
         .defaultPosition(.center)
+        .commands {
+            CommandMenu(L10n.shared.t("menu.navigate")) {
+                ForEach(AppSection.allCases) { section in
+                    if let key = section.shortcutKey {
+                        Button(L10n.shared.t(section.titleKey)) { model.section = section }
+                            .keyboardShortcut(key, modifiers: .command)
+                    }
+                }
+                Divider()
+                Button(L10n.shared.t("menu.find.search")) { model.searchFocusRequest += 1 }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
+        }
     }
 }
 
@@ -296,5 +309,6 @@ struct SidebarRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(section.shortcutHint ?? "")
     }
 }

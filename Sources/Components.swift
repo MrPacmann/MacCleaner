@@ -98,7 +98,9 @@ struct FileIconView: View {
 // MARK: - Поле поиска по списку
 
 struct SearchField: View {
+    @Environment(CleanerViewModel.self) private var model
     @Binding var query: String
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -108,6 +110,7 @@ struct SearchField: View {
             TextField(L10n.shared.t("search.placeholder"), text: $query)
                 .textFieldStyle(.plain)
                 .font(.callout)
+                .focused($focused)
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -119,6 +122,8 @@ struct SearchField: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.ghost, in: RoundedRectangle(cornerRadius: 10))
+        // Cmd+F из меню «Переход»: модель увеличивает счётчик — берём фокус
+        .onChange(of: model.searchFocusRequest) { focused = true }
     }
 }
 

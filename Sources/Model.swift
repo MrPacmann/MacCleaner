@@ -29,6 +29,7 @@ final class L10n {
         "sec.apps": "Приложения", "sec.downloads": "Загрузки",
         "sec.junk": "Системный мусор", "sec.startup": "Автозагрузка",
         "sec.trash": "Корзина", "sec.history": "История", "sec.settings": "Настройки",
+        "menu.navigate": "Переход", "menu.find.search": "Найти в списке…",
         "sub.overview": "Всё пространство. Под вашим контролем.",
         "sub.largeFiles": "Файлы больше 50 МБ, которые занимают место.",
         "sub.folders": "Не один большой файл, а папки, которые набрали вес по мелочи.",
@@ -186,6 +187,7 @@ final class L10n {
         "sec.apps": "Applications", "sec.downloads": "Downloads",
         "sec.junk": "System Junk", "sec.startup": "Login Items",
         "sec.trash": "Trash", "sec.history": "History", "sec.settings": "Settings",
+        "menu.navigate": "Navigate", "menu.find.search": "Find in List…",
         "sub.overview": "All your space. Under your control.",
         "sub.largeFiles": "Files over 50 MB taking up space.",
         "sub.folders": "Not one big file — folders that gained weight byte by byte.",
@@ -595,6 +597,31 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .settings: return "sec.settings"
         }
     }
+
+    /// Горячая клавиша раздела (нажимается с ⌘): 1…9 по порядку в сайдбаре,
+    /// 0 — Корзина, запятая — Настройки (стандарт macOS). У Истории нет.
+    var shortcutKey: KeyEquivalent? {
+        switch self {
+        case .overview: return "1"
+        case .largeFiles: return "2"
+        case .folders: return "3"
+        case .map: return "4"
+        case .duplicates: return "5"
+        case .apps: return "6"
+        case .downloads: return "7"
+        case .junk: return "8"
+        case .startup: return "9"
+        case .trash: return "0"
+        case .settings: return ","
+        case .history: return nil
+        }
+    }
+
+    /// Подсказка для тултипа в сайдбаре: «⌘1»
+    var shortcutHint: String? {
+        guard let key = shortcutKey else { return nil }
+        return "⌘\(key.character)"
+    }
 }
 
 // MARK: - Главная модель
@@ -603,6 +630,8 @@ enum AppSection: String, CaseIterable, Identifiable {
 @Observable
 final class CleanerViewModel {
     var section: AppSection = .overview
+    /// Счётчик запросов фокуса на поле поиска (Cmd+F): поле следит и берёт фокус
+    var searchFocusRequest: Int = 0
     /// Открытая категория детализации в «Обзоре диска» (nil — обычный обзор)
     var drillCategory: FileCategory? = nil
 
