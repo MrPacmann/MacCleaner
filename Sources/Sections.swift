@@ -1516,6 +1516,8 @@ struct GrowthCard: View {
 
 struct SettingsView: View {
     @Environment(CleanerViewModel.self) private var model
+    @State private var installing = false
+    @State private var installFailed = false
 
     var appVersion: String {
         let info = Bundle.main.infoDictionary
@@ -1575,6 +1577,42 @@ struct SettingsView: View {
                     .padding(16)
                 }
 
+                // Установка в «Программы» (показываем, только если запущено не оттуда)
+                if !AppInstaller.isInApplications {
+                    Card {
+                        HStack(spacing: 12) {
+                            IconTile(symbol: "arrow.down.app", color: Theme.success, size: 40)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L10n.shared.t("settings.installApp")).font(.callout.weight(.semibold))
+                                Text(L10n.shared.t("settings.installAppDesc"))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if installing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                if installFailed {
+                                    Text(L10n.shared.t("settings.installFailed"))
+                                        .badgeStyle(color: Theme.danger)
+                                    GhostButton(title: L10n.shared.t("help.finder")) {
+                                        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                                    }
+                                } else {
+                                    GhostButton(title: L10n.shared.t("btn.install")) {
+                                        installing = true
+                                        Task {
+                                            let ok = await AppInstaller.installToApplications()
+                                            installing = false
+                                            if !ok { installFailed = true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+
                 // Обновления
                 Card {
                     HStack(spacing: 12) {
@@ -1617,35 +1655,63 @@ struct SettingsView: View {
     @ViewBuilder
     var updateAction: some View {
         let updater = UpdateChecker.shared
-        switch updater.state {
-        case .idle:
-            GhostButton(title: L10n.shared.t("settings.checkUpdates")) {
-                Task { await updater.check() }
-            }
-        case .checking:
+        // Если идёт установка скачанного обновления — показываем её стадию
+        switch updater.installState {
+        case .downloading:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(L10n.shared.t("upd.checking")).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.shared.t("upd.downloading")).font(.caption).foregroundStyle(.secondary)
             }
-        case .current:
-            HStack(spacing: 10) {
-                Text(L10n.shared.t("settings.latestVersion")).badgeStyle(color: Theme.success)
-                GhostButton(title: L10n.shared.t("btn.update")) {
-                    Task { await updater.check() }
-                }
+        case .installing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(L10n.shared.t("upd.installing")).font(.caption).foregroundStyle(.secondary)
             }
-        case .available(let v):
+        case .ready:
             HStack(spacing: 10) {
-                Text(L10n.shared.f("upd.available", v)).badgeStyle(color: Theme.accent)
-                GhostButton(title: L10n.shared.t("upd.download")) {
-                    updater.openReleasePage()
+                Text(L10n.shared.t("upd.ready")).badgeStyle(color: Theme.success)
+                GhostButton(title: L10n.shared.t("upd.relaunch")) {
+                    updater.relaunch()
                 }
             }
         case .failed:
             HStack(spacing: 10) {
-                Text(L10n.shared.t("upd.failed")).badgeStyle(color: Theme.danger)
+                Text(L10n.shared.t("upd.installFailed")).badgeStyle(color: Theme.danger)
+                GhostButton(title: L10n.shared.t("upd.download")) {
+                    updater.openReleasePage()
+                }
+            }
+        case .idle:
+            switch updater.state {
+            case .idle:
                 GhostButton(title: L10n.shared.t("settings.checkUpdates")) {
                     Task { await updater.check() }
+                }
+            case .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.shared.t("upd.checking")).font(.caption).foregroundStyle(.secondary)
+                }
+            case .current:
+                HStack(spacing: 10) {
+                    Text(L10n.shared.t("settings.latestVersion")).badgeStyle(color: Theme.success)
+                    GhostButton(title: L10n.shared.t("btn.update")) {
+                        Task { await updater.check() }
+                    }
+                }
+            case .available(let v):
+                HStack(spacing: 10) {
+                    Text(L10n.shared.f("upd.available", v)).badgeStyle(color: Theme.accent)
+                    GhostButton(title: L10n.shared.t("upd.downloadInstall")) {
+                        Task { await updater.downloadAndInstall() }
+                    }
+                }
+            case .failed:
+                HStack(spacing: 10) {
+                    Text(L10n.shared.t("upd.failed")).badgeStyle(color: Theme.danger)
+                    GhostButton(title: L10n.shared.t("settings.checkUpdates")) {
+                        Task { await updater.check() }
+                    }
                 }
             }
         }
