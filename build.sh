@@ -22,9 +22,16 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-echo "→ Подписываю (ad-hoc, для локального запуска)…"
+echo "→ Подписываю…"
 xattr -cr "$APP"
-codesign --force --sign - "$APP"
+if security find-identity -v -p codesigning | grep -q "MacCleaner Dev"; then
+  # Стабильная локальная подпись: macOS (TCC) запоминает выданные
+  # разрешения между сборками и обновлениями.
+  codesign --force --sign "MacCleaner Dev" "$APP"
+else
+  # Запасной вариант: ad-hoc (разрешения будут переспрашивать после каждой сборки)
+  codesign --force --sign - "$APP"
+fi
 
 echo "✓ Готово: $APP"
 echo "  Запуск: open \"$APP\""

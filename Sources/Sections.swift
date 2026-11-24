@@ -39,10 +39,9 @@ struct OverviewView: View {
             }
         }
         .task {
-            await model.runDeepScan()
-            // Тихие фоновые сканы для рекомендаций в «Что дальше?»
-            if model.downloadsCategory.status == .idle { await model.scanJunk(model.downloadsCategory) }
-            if model.trashCategory.status == .idle { await model.scanJunk(model.trashCategory) }
+            // При запуске — только цифры диска. Сканирование стартует
+            // исключительно по кнопке, чтобы не спамить окнами разрешений.
+            if model.disk.phase == .idle { model.refreshVolumeInfo() }
         }
     }
 
@@ -55,9 +54,9 @@ struct OverviewView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    ScanButton(title: L10n.shared.t("btn.rescan"),
+                    ScanButton(title: L10n.shared.t(model.disk.phase == .idle ? "btn.scan" : "btn.rescan"),
                                isScanning: model.disk.phase == .scanning) {
-                        Task { await model.runDeepScan(force: true) }
+                        Task { await model.scanWithRecommendations(force: true) }
                     }
                 }
 

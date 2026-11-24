@@ -837,6 +837,23 @@ final class CleanerViewModel {
 
     // MARK: Глубокое сканирование диска
 
+    /// Лёгкое обновление цифр «свободно/всего» без перебора файлов —
+    /// не требует разрешений, можно звать при запуске приложения
+    func refreshVolumeInfo() {
+        let caps = Scanner.volumeCapacities()
+        disk.volumeTotal = caps.total
+        disk.volumeFree = caps.free
+    }
+
+    /// Полное сканирование по кнопке + тихие сканы для «Что дальше?»
+    func scanWithRecommendations(force: Bool) async {
+        await runDeepScan(force: force)
+        if disk.phase == .done {
+            if downloadsCategory.status == .idle { await scanJunk(downloadsCategory) }
+            if trashCategory.status == .idle { await scanJunk(trashCategory) }
+        }
+    }
+
     func runDeepScan(force: Bool = false) async {
         if disk.phase == .scanning { return }
         if disk.phase == .done && !force { return }
