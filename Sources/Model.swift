@@ -254,6 +254,7 @@ final class L10n {
         "mb.ip": "Локальный IP: %@",
         "mb.down": "↓ %@/с",
         "mb.up": "↑ %@/с",
+        "mon.ram": "%@ ОЗУ",
         "mb.offline": "Нет соединения",
     ]
 
@@ -488,6 +489,7 @@ final class L10n {
         "mb.ip": "Local IP: %@",
         "mb.down": "↓ %@/s",
         "mb.up": "↑ %@/s",
+        "mon.ram": "%@ RAM",
         "mb.offline": "Offline",
     ]
 }
