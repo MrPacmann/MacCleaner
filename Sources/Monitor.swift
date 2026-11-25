@@ -31,6 +31,9 @@ final class MonitorState {
     var diskTotal: UInt64 = 0
     /// Локальный IP (en0). nil — нет соединения
     var localIP: String? = nil
+    /// Текущая скорость сети, байт/сек (дельта счётчиков между тиками)
+    var netDown: UInt64 = 0
+    var netUp: UInt64 = 0
     /// Размер Корзины (считается редко — du по большой Корзине медленный)
     var trashSize: UInt64? = nil
     private var tick = 0
@@ -42,6 +45,8 @@ final class MonitorState {
         .isEmpty ? "Apple Silicon" : MonitorState.sysctlString("machdep.cpu.brand_string")
 
     private var prevTicks: (user: UInt64, sys: UInt64, idle: UInt64, nice: UInt64)?
+    /// Предыдущий замер сетевых счётчиков (для скорости)
+    private var prevNet: (down: UInt64, up: UInt64, at: Date)?
 
     func refresh() {
         // CPU: дельта тиков между замерами
@@ -70,6 +75,7 @@ final class MonitorState {
         diskFree = caps.free
         diskTotal = caps.total
         localIP = Self.localIPv4()
+        updateNetSpeed()
 
         // Корзина — раз в минуту (каждый 30-й тик по 2 секунды)
         tick += 1
@@ -98,6 +104,42 @@ final class MonitorState {
             result = String(cString: host)
         }
         return result
+    }
+
+    /// Суммарные счётчики байт по всем активным интерфейсам (кроме lo0)
+    private static func netCounters() -> (down: UInt64, up: UInt64) {
+        var iflist: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&iflist) == 0, let first = iflist else { return (0, 0) }
+        defer { freeifaddrs(iflist) }
+        var down: UInt64 = 0
+        var up: UInt64 = 0
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            let family = ptr.pointee.ifa_addr.pointee.sa_family
+            let flags = Int32(ptr.pointee.ifa_flags)
+            // Берём только канальный уровень (там лежит if_data), пропускаем loopback и погашенные
+            guard family == UInt8(AF_LINK), name != "lo0", (flags & IFF_UP) != 0,
+                  let data = ptr.pointee.ifa_data else { continue }
+            let ifd = data.assumingMemoryBound(to: if_data.self).pointee
+            down &+= UInt64(ifd.ifi_ibytes)
+            up &+= UInt64(ifd.ifi_obytes)
+        }
+        return (down, up)
+    }
+
+    /// Пересчёт скорости по дельте счётчиков между тиками refresh()
+    private func updateNetSpeed() {
+        let counters = Self.netCounters()
+        let now = Date()
+        if let prev = prevNet {
+            let dt = now.timeIntervalSince(prev.at)
+            if dt > 0 {
+                // &- переживает 32-битное переполнение счётчиков
+                netDown = UInt64(Double(counters.down &- prev.down) / dt)
+                netUp = UInt64(Double(counters.up &- prev.up) / dt)
+            }
+        }
+        prevNet = (counters.down, counters.up, now)
     }
 
     // MARK: Низкоуровневые замеры

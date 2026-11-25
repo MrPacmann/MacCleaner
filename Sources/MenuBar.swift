@@ -152,6 +152,8 @@ struct MenuBarPanelView: View {
                                String(format: "%.2f", monitor.loadAvg.1),
                                String(format: "%.2f", monitor.loadAvg.2)))
             Text(L10n.shared.f("mon.cores", monitor.coreCount))
+            MiniBar(value: monitor.cpuUsage, color: Color(red: 0.55, green: 0.72, blue: 0.95))
+                .padding(.top, 2)
         }
     }
 
@@ -161,6 +163,8 @@ struct MenuBarPanelView: View {
                             title: "\(L10n.shared.t("mon.memory")): \(pct)%") {
             Text(L10n.shared.f("mon.usedOf", Format.bytes(monitor.memUsed), Format.bytes(monitor.memTotal)))
             Text(L10n.shared.f("mon.swap", Format.bytes(monitor.swapUsed)))
+            MiniBar(value: Double(pct) / 100, color: Color(red: 0.42, green: 0.84, blue: 0.72))
+                .padding(.top, 2)
         }
     }
 
@@ -188,6 +192,9 @@ struct MenuBarPanelView: View {
                         : L10n.shared.t("mon.battery")) {
             if monitor.hasBattery {
                 Text(L10n.shared.t(monitor.batteryCharging ? "mon.charging" : "mon.discharging"))
+                MiniBar(value: Double(monitor.batteryLevel) / 100,
+                        color: Color(red: 0.86, green: 0.89, blue: 0.45))
+                    .padding(.top, 2)
             } else {
                 Text(L10n.shared.t("mon.noBattery"))
             }
@@ -200,6 +207,8 @@ struct MenuBarPanelView: View {
                      title: L10n.shared.t("mb.network")) {
             if let ip = monitor.localIP {
                 Text(L10n.shared.f("mb.ip", ip))
+                Text(L10n.shared.f("mb.down", Format.bytes(monitor.netDown)))
+                Text(L10n.shared.f("mb.up", Format.bytes(monitor.netUp)))
             } else {
                 Text(L10n.shared.t("mb.offline"))
             }

@@ -252,6 +252,8 @@ final class L10n {
         "mon.freeOf": "%@ свободно из %@",
         "mb.network": "Сеть",
         "mb.ip": "Локальный IP: %@",
+        "mb.down": "↓ %@/с",
+        "mb.up": "↑ %@/с",
         "mb.offline": "Нет соединения",
     ]
 
@@ -484,6 +486,8 @@ final class L10n {
         "mon.freeOf": "%@ free of %@",
         "mb.network": "Network",
         "mb.ip": "Local IP: %@",
+        "mb.down": "↓ %@/s",
+        "mb.up": "↑ %@/s",
         "mb.offline": "Offline",
     ]
 }
