@@ -202,6 +202,48 @@ final class L10n {
         "help.finderOpen": "Открыть в Finder и посмотреть содержимое",
         "help.tapOpen": "нажмите, чтобы открыть",
         "hint.dl.title": "Старые загрузки",
+        "sec.extensions": "Расширения", "sec.monitor": "Мониторинг",
+        "sub.extensions": "Quick Look, плагины и службы. Отключайте лишнее.",
+        "sub.monitor": "Процессор, память, батарея и нагрев в реальном времени.",
+        "junk.crashlogs.t": "Крашлоги", "junk.crashlogs.s": "Отчёты о сбоях приложений из DiagnosticReports",
+        "junk.partial.t": "Недокачки и виндовый мусор", "junk.partial.s": ".download, .crdownload, .part, Thumbs.db, desktop.ini",
+        "junk.plist.t": "Битые настройки", "junk.plist.s": "Повреждённые .plist — приложение создаст новые",
+        "junk.privacy.t": "Приватность браузеров", "junk.privacy.s": "История и куки — закройте браузер перед удалением",
+        "note.partial": "Незавершённая загрузка",
+        "note.windows": "Служебный файл Windows",
+        "note.plist": "Файл не читается — приложение создаст новый",
+        "note.history": "История посещений — браузер создаст новый файл",
+        "note.cookies": "Куки — сайты попросят войти заново",
+        "note.formhistory": "Автозаполнение форм",
+        "ext.banner.t": "Расширения работают в фоне",
+        "ext.banner.s": "Удаление — только в Корзину: вернёте на место, если что-то перестанет работать.",
+        "ext.quicklook": "Quick Look",
+        "ext.plugins": "Интернет-плагины",
+        "ext.services": "Службы",
+        "ext.prefpanes": "Панели настроек",
+        "ext.spotlight": "Импортёры Spotlight",
+        "ext.empty.t": "Сторонних расширений нет",
+        "ext.empty.s": "Quick Look, плагины и службы чисты.",
+        "ext.footer": "%d расширений · %@",
+        "uninst.resetData": "Сбросить (%@)",
+        "uninst.resetHint": "Сброс удаляет только данные — приложение останется на месте.",
+        "menubar.trash": "Корзина: %@",
+        "mon.cpu": "Процессор", "mon.memory": "Память", "mon.battery": "Батарея",
+        "mon.thermal": "Нагрев", "mon.system": "Система", "mon.disk": "Диск",
+        "mon.loadAvg": "Нагрузка: %@ · %@ · %@",
+        "mon.cores": "%d ядер",
+        "mon.usedOf": "%@ из %@",
+        "mon.swap": "Подкачка: %@",
+        "mon.charging": "заряжается", "mon.discharging": "от батареи",
+        "mon.noBattery": "Батареи нет — питание от сети",
+        "mon.thermal.nominal": "Нормальный",
+        "mon.thermal.fair": "Умеренный",
+        "mon.thermal.serious": "Высокий — Mac замедляется",
+        "mon.thermal.critical": "Критический!",
+        "mon.tempNote": "Точная температура и обороты вентиляторов на Apple Silicon доступны только с правами администратора — поэтому показываем оценку нагрева от самой системы.",
+        "mon.uptime": "Аптайм: %@",
+        "mon.mac": "macOS %@ · %@",
+        "mon.freeOf": "%@ свободно из %@",
     ]
 
     static let en: [String: String] = [
@@ -383,6 +425,48 @@ final class L10n {
         "help.finderOpen": "Open in Finder to inspect",
         "help.tapOpen": "click to open",
         "hint.dl.title": "Old downloads",
+        "sec.extensions": "Extensions", "sec.monitor": "Monitor",
+        "sub.extensions": "Quick Look, plug-ins and services. Disable what you don't need.",
+        "sub.monitor": "CPU, memory, battery and thermal state in real time.",
+        "junk.crashlogs.t": "Crash logs", "junk.crashlogs.s": "App crash reports from DiagnosticReports",
+        "junk.partial.t": "Partial downloads & Windows junk", "junk.partial.s": ".download, .crdownload, .part, Thumbs.db, desktop.ini",
+        "junk.plist.t": "Broken preferences", "junk.plist.s": "Corrupted .plist files — apps will recreate them",
+        "junk.privacy.t": "Browser privacy", "junk.privacy.s": "History and cookies — quit the browser before deleting",
+        "note.partial": "Incomplete download",
+        "note.windows": "Windows service file",
+        "note.plist": "Unreadable — the app will create a fresh one",
+        "note.history": "Browsing history — the browser will create a new file",
+        "note.cookies": "Cookies — sites will ask you to sign in again",
+        "note.formhistory": "Form autofill history",
+        "ext.banner.t": "Extensions run in the background",
+        "ext.banner.s": "Removal goes to Trash only — put anything back if something stops working.",
+        "ext.quicklook": "Quick Look",
+        "ext.plugins": "Internet plug-ins",
+        "ext.services": "Services",
+        "ext.prefpanes": "Preference panes",
+        "ext.spotlight": "Spotlight importers",
+        "ext.empty.t": "No third-party extensions",
+        "ext.empty.s": "Quick Look, plug-ins and services are clean.",
+        "ext.footer": "%d extensions · %@",
+        "uninst.resetData": "Reset (%@)",
+        "uninst.resetHint": "Reset removes only the data — the app stays in place.",
+        "menubar.trash": "Trash: %@",
+        "mon.cpu": "CPU", "mon.memory": "Memory", "mon.battery": "Battery",
+        "mon.thermal": "Thermal", "mon.system": "System", "mon.disk": "Disk",
+        "mon.loadAvg": "Load: %@ · %@ · %@",
+        "mon.cores": "%d cores",
+        "mon.usedOf": "%@ of %@",
+        "mon.swap": "Swap: %@",
+        "mon.charging": "charging", "mon.discharging": "on battery",
+        "mon.noBattery": "No battery — running on AC power",
+        "mon.thermal.nominal": "Nominal",
+        "mon.thermal.fair": "Fair",
+        "mon.thermal.serious": "High — your Mac is throttling",
+        "mon.thermal.critical": "Critical!",
+        "mon.tempNote": "Exact temperatures and fan speeds on Apple Silicon require administrator rights — so we show the system's own thermal pressure estimate instead.",
+        "mon.uptime": "Uptime: %@",
+        "mon.mac": "macOS %@ · %@",
+        "mon.freeOf": "%@ free of %@",
     ]
 }
 
@@ -582,6 +666,24 @@ final class StartupState {
     var items: [StartupItem] = []
 }
 
+// MARK: - Расширения системы
+
+struct ExtensionGroup: Identifiable {
+    var id: String { key }
+    let key: String          // ключ локализации названия группы (ext.quicklook и т.п.)
+    var items: [CleanItem]
+    var total: UInt64 { items.reduce(0) { $0 + $1.size } }
+}
+
+@Observable
+final class ExtensionsState {
+    var status: ScanStatus = .idle
+    var groups: [ExtensionGroup] = []
+
+    var count: Int { groups.reduce(0) { $0 + $1.items.count } }
+    var total: UInt64 { groups.reduce(0) { $0 + $1.total } }
+}
+
 // MARK: - История
 
 struct HistoryEntry: Codable, Identifiable {
@@ -624,8 +726,10 @@ enum AppSection: String, CaseIterable, Identifiable {
     case downloads = "Загрузки"
     case junk = "Системный мусор"
     case startup = "Автозагрузка"
+    case extensions = "Расширения"
     case trash = "Корзина"
     case history = "История"
+    case monitor = "Мониторинг"
     case settings = "Настройки"
 
     var id: String { rawValue }
@@ -640,8 +744,10 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .downloads: return "arrow.down.circle"
         case .junk: return "archivebox"
         case .startup: return "bolt"
+        case .extensions: return "puzzlepiece.extension"
         case .trash: return "trash"
         case .history: return "clock.arrow.circlepath"
+        case .monitor: return "cpu"
         case .settings: return "gearshape"
         }
     }
@@ -658,14 +764,17 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .downloads: return "sec.downloads"
         case .junk: return "sec.junk"
         case .startup: return "sec.startup"
+        case .extensions: return "sec.extensions"
         case .trash: return "sec.trash"
         case .history: return "sec.history"
+        case .monitor: return "sec.monitor"
         case .settings: return "sec.settings"
         }
     }
 
     /// Горячая клавиша раздела (нажимается с ⌘): 1…9 по порядку в сайдбаре,
-    /// 0 — Корзина, запятая — Настройки (стандарт macOS). У Истории нет.
+    /// 0 — Корзина, запятая — Настройки (стандарт macOS).
+    /// У Расширений, Истории и Мониторинга нет — цифры кончились.
     var shortcutKey: KeyEquivalent? {
         switch self {
         case .overview: return "1"
@@ -679,7 +788,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .startup: return "9"
         case .trash: return "0"
         case .settings: return ","
-        case .history: return nil
+        case .extensions, .monitor, .history: return nil
         }
     }
 
@@ -754,6 +863,18 @@ final class CleanerViewModel {
         CategoryState(id: "docker", title: "Docker",
                       subtitle: "Виртуальный диск и кэши Docker Desktop",
                       icon: "shippingbox.circle", isSafe: false),
+        CategoryState(id: "crashlogs", title: "Крашлоги",
+                      subtitle: "Отчёты о сбоях приложений из DiagnosticReports",
+                      icon: "ladybug", isSafe: false),
+        CategoryState(id: "partial", title: "Недокачки и виндовый мусор",
+                      subtitle: ".download, .crdownload, .part, Thumbs.db, desktop.ini",
+                      icon: "arrow.down.doc", isSafe: false),
+        CategoryState(id: "plist", title: "Битые настройки",
+                      subtitle: "Повреждённые .plist — приложение создаст новые",
+                      icon: "gearshape.2", isSafe: false),
+        CategoryState(id: "privacy", title: "Приватность браузеров",
+                      subtitle: "История и куки — закройте браузер перед удалением",
+                      icon: "hand.raised", isSafe: false),
     ]
 
     var downloadsCategory = CategoryState(id: "downloads", title: "Старые загрузки (> 30 дней)",
@@ -767,6 +888,8 @@ final class CleanerViewModel {
     var dupes = DupeScanState()
     var appsState = AppsState()
     var startup = StartupState()
+    var extensionsState = ExtensionsState()
+    var monitor = MonitorState()
     var history: [HistoryEntry] = []
     /// Снапшоты диска по итогам сканирований (старые — первые)
     var snapshots: [DiskSnapshot] = []
@@ -946,6 +1069,15 @@ final class CleanerViewModel {
         startup.status = .done
     }
 
+    // MARK: Расширения системы
+
+    func scanExtensions() async {
+        extensionsState.status = .scanning
+        extensionsState.groups = await Scanner.scanExtensions()
+        for g in extensionsState.groups { index(g.items) }
+        extensionsState.status = .done
+    }
+
     // MARK: Удаление (только через Корзину)
 
     func trashSelected() async {
@@ -995,6 +1127,10 @@ final class CleanerViewModel {
         appsState.orphans.removeAll { moved.contains($0.path) }
         appsState.apps.removeAll { moved.contains($0.url.path) }
         startup.items.removeAll { moved.contains($0.path) }
+        for gi in extensionsState.groups.indices {
+            extensionsState.groups[gi].items.removeAll { moved.contains($0.path) }
+        }
+        extensionsState.groups.removeAll { $0.items.isEmpty }
         for i in dupes.groups.indices {
             dupes.groups[i].paths.removeAll { moved.contains($0) }
         }

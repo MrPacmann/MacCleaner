@@ -62,6 +62,15 @@ enum Scanner {
             return ScanResult(items: await scanProjectJunk(), denied: false)
         case "docker":
             return ScanResult(items: await scanDockerData(), denied: false)
+        case "crashlogs":
+            return ScanResult(items: await scanChildren(of: home + "/Library/Logs/DiagnosticReports",
+                                                        note: nil, minSize: 4 * 1024), denied: false)
+        case "partial":
+            return ScanResult(items: await scanPartialDownloads(), denied: false)
+        case "plist":
+            return ScanResult(items: await scanBrokenPlists(), denied: false)
+        case "privacy":
+            return ScanResult(items: await scanPrivacy(), denied: false)
         default:
             throw ScanError.unknownCategory
         }
@@ -97,12 +106,12 @@ enum Scanner {
         return items.sorted { $0.size > $1.size }
     }
 
-    static func scanChildren(of root: String, note: String?) async -> [CleanItem] {
+    static func scanChildren(of root: String, note: String?, minSize: UInt64 = 64 * 1024) async -> [CleanItem] {
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
         let items = await mapLimit(entries, 8) { name -> CleanItem? in
             let p = (root as NSString).appendingPathComponent(name)
             let size = await duSize(p)
-            if size < 64 * 1024 { return nil }
+            if size < minSize { return nil }
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
             let attrs = try? FileManager.default.attributesOfItem(atPath: p)
@@ -253,6 +262,185 @@ enum Scanner {
             }
         }
         return items.sorted { $0.size > $1.size }
+    }
+
+    /// Недокачки (.download, .crdownload, .part, .partial) и виндовый мусор
+    /// (Thumbs.db, desktop.ini) в Загрузках, на Рабочем столе и в Документах.
+    static func scanPartialDownloads() async -> [CleanItem] {
+        let partialNote = L10n.shared.t("note.partial")
+        let winNote = L10n.shared.t("note.windows")
+        let names: [(String, String)] = [
+            ("*.download", partialNote), ("*.crdownload", partialNote),
+            ("*.part", partialNote), ("*.partial", partialNote),
+            ("Thumbs.db", winNote), ("desktop.ini", winNote),
+        ]
+        var expr: [String] = ["("]
+        for (i, n) in names.enumerated() {
+            if i > 0 { expr.append("-o") }
+            expr += ["-name", n.0]
+        }
+        expr.append(")")
+        let roots = ["Downloads", "Desktop", "Documents"]
+            .map { home + "/" + $0 }
+            .filter { FileManager.default.fileExists(atPath: $0) }
+        var found: [String: String] = [:]  // path → note
+        for root in roots {
+            guard let out = await runProc("/usr/bin/find", [root, "-maxdepth", "6"] + expr) else { continue }
+            for line in out.split(separator: "\n") {
+                let p = String(line).trimmingCharacters(in: .whitespaces)
+                if p.isEmpty || p.contains("/Library/") { continue }
+                let base = (p as NSString).lastPathComponent.lowercased()
+                let note = names.first { n, _ in
+                    n.hasPrefix("*") ? base.hasSuffix(n.dropFirst()) : base == n.lowercased()
+                }?.1
+                if found[p] == nil { found[p] = note ?? partialNote }
+            }
+        }
+        let notes = found
+        let items = await mapLimit(Array(notes.keys), 8) { p -> CleanItem? in
+            let fm = FileManager.default
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: p, isDirectory: &isDir) else { return nil }
+            let size: UInt64
+            if isDir.boolValue {
+                size = await duSize(p)  // .download — это пакеты-папки
+            } else {
+                size = ((try? fm.attributesOfItem(atPath: p))?[.size] as? NSNumber)?.uint64Value ?? 0
+            }
+            if size < 1024 { return nil }
+            let attrs = try? fm.attributesOfItem(atPath: p)
+            return CleanItem(path: p, name: p.replacingOccurrences(of: home, with: "~"),
+                             size: size, mtime: attrs?[.modificationDate] as? Date,
+                             isDir: isDir.boolValue, note: notes[p])
+        }
+        return items.sorted { $0.size > $1.size }
+    }
+
+    /// Битые .plist в ~/Library/Preferences: macOS не может их прочитать,
+    /// из-за этого приложения иногда теряют настройки или глючат.
+    /// Удалённый файл приложение создаст заново при запуске.
+    static func scanBrokenPlists() async -> [CleanItem] {
+        let dir = home + "/Library/Preferences"
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
+        var items: [CleanItem] = []
+        let note = L10n.shared.t("note.plist")
+        for entry in entries where entry.hasSuffix(".plist") && !entry.hasPrefix("com.apple") {
+            let p = dir + "/" + entry
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: p)), !data.isEmpty else { continue }
+            if (try? PropertyListSerialization.propertyList(from: data, format: nil)) != nil { continue }
+            let attrs = try? FileManager.default.attributesOfItem(atPath: p)
+            let size = (attrs?[.size] as? NSNumber)?.uint64Value ?? 0
+            items.append(CleanItem(path: p, name: entry, size: size,
+                                   mtime: attrs?[.modificationDate] as? Date,
+                                   isDir: false, note: note))
+        }
+        return items.sorted { $0.size > $1.size }
+    }
+
+    /// История посещений и куки браузеров.
+    /// Файлы уходят в Корзину — браузер создаст новые (закройте браузер перед удалением).
+    static func scanPrivacy() async -> [CleanItem] {
+        let fm = FileManager.default
+        var items: [CleanItem] = []
+        let histNote = L10n.shared.t("note.history")
+        let cookieNote = L10n.shared.t("note.cookies")
+
+        func add(_ path: String, _ name: String, _ note: String) {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { return }
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  let size = (attrs[.size] as? NSNumber)?.uint64Value, size > 0 else { return }
+            items.append(CleanItem(path: path, name: name, size: size,
+                                   mtime: attrs[.modificationDate] as? Date,
+                                   isDir: false, note: note))
+        }
+
+        // Safari (нужен Полный доступ к диску)
+        add(home + "/Library/Safari/History.db", "Safari: History.db", histNote)
+        add(home + "/Library/Safari/History.db-wal", "Safari: History.db-wal", histNote)
+        add(home + "/Library/Safari/History.db-shm", "Safari: History.db-shm", histNote)
+        add(home + "/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+            "Safari: Cookies", cookieNote)
+
+        // Chromium-семейство: профили Default / Profile N
+        let chromiums: [(String, String)] = [
+            ("Google/Chrome", "Chrome"),
+            ("Microsoft Edge", "Edge"),
+            ("BraveSoftware/Brave-Browser", "Brave"),
+            ("Arc/User Data", "Arc"),
+            ("Chromium", "Chromium"),
+            ("Yandex/YandexBrowser", "Yandex"),
+            ("Vivaldi", "Vivaldi"),
+        ]
+        for (rel, browser) in chromiums {
+            let root = home + "/Library/Application Support/" + rel
+            guard let profiles = try? fm.contentsOfDirectory(atPath: root) else { continue }
+            for prof in profiles where prof == "Default" || prof.hasPrefix("Profile ") || prof.hasPrefix("Person ") {
+                let dir = root + "/" + prof
+                add(dir + "/History", "\(browser): History (\(prof))", histNote)
+                add(dir + "/History-journal", "\(browser): History-journal (\(prof))", histNote)
+                add(dir + "/Network/Cookies", "\(browser): Cookies (\(prof))", cookieNote)
+                add(dir + "/Network/Cookies-journal", "\(browser): Cookies-journal (\(prof))", cookieNote)
+                add(dir + "/Cookies", "\(browser): Cookies (\(prof))", cookieNote)
+            }
+        }
+
+        // Opera (другая раскладка: файлы прямо в профиле)
+        let opera = home + "/Library/Application Support/Opera Software/Opera Stable"
+        add(opera + "/History", "Opera: History", histNote)
+        add(opera + "/Cookies", "Opera: Cookies", cookieNote)
+
+        // Firefox: история живёт в places.sqlite вместе с закладками — её не трогаем.
+        // Чистим только куки и историю автозаполнения форм.
+        let ffRoot = home + "/Library/Application Support/Firefox/Profiles"
+        if let profiles = try? fm.contentsOfDirectory(atPath: ffRoot) {
+            for prof in profiles {
+                let dir = ffRoot + "/" + prof
+                add(dir + "/cookies.sqlite", "Firefox: cookies (\(prof))", cookieNote)
+                add(dir + "/cookies.sqlite-wal", "Firefox: cookies-wal (\(prof))", cookieNote)
+                add(dir + "/formhistory.sqlite", "Firefox: formhistory (\(prof))",
+                    L10n.shared.t("note.formhistory"))
+            }
+        }
+        return items.sorted { $0.size > $1.size }
+    }
+
+    // MARK: - Расширения системы (QuickLook, интернет-плагины, службы и т.п.)
+
+    /// Группы расширений: ключ локализации + папки (пользовательские и общесистемные).
+    static let extensionDirs: [(key: String, dirs: [String])] = [
+        ("ext.quicklook", ["~/Library/QuickLook", "/Library/QuickLook"]),
+        ("ext.plugins", ["~/Library/Internet Plug-Ins", "/Library/Internet Plug-Ins"]),
+        ("ext.services", ["~/Library/Services"]),
+        ("ext.prefpanes", ["~/Library/PreferencePanes", "/Library/PreferencePanes"]),
+        ("ext.spotlight", ["~/Library/Spotlight", "/Library/Spotlight"]),
+    ]
+
+    /// Сканирование расширений. Возвращает только непустые группы.
+    /// Системные Apple-расширения (/System/Library/…) сюда не входят.
+    static func scanExtensions() async -> [ExtensionGroup] {
+        var groups: [ExtensionGroup] = []
+        for g in extensionDirs {
+            var items: [CleanItem] = []
+            for dir in g.dirs.map({ $0.replacingOccurrences(of: "~", with: home) }) {
+                guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
+                for entry in entries where !entry.hasPrefix(".") {
+                    let p = dir + "/" + entry
+                    let size = await duSize(p)
+                    var isDir: ObjCBool = false
+                    FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
+                    let attrs = try? FileManager.default.attributesOfItem(atPath: p)
+                    items.append(CleanItem(path: p, name: entry, size: size,
+                                           mtime: attrs?[.modificationDate] as? Date,
+                                           isDir: isDir.boolValue, note: nil))
+                }
+            }
+            items.sort { $0.size > $1.size }
+            if !items.isEmpty {
+                groups.append(ExtensionGroup(key: g.key, items: items))
+            }
+        }
+        return groups
     }
 
     /// Локальные снимки Time Machine (только чтение списка).

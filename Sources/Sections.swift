@@ -962,6 +962,22 @@ struct UninstallSheet: View {
                 .font(.caption).foregroundStyle(.tertiary)
 
             HStack {
+                // Сброс: в Корзину уходят только выбранные данные, приложение остаётся
+                if !chosen.isEmpty {
+                    Button {
+                        let paths = Array(chosen)
+                        model.appsState.showUninstallSheet = false
+                        Task { await model.trashPaths(paths) }
+                    } label: {
+                        Text(L10n.shared.f("uninst.resetData", Format.bytes(totalChosen)))
+                            .font(.callout.weight(.medium))
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .background(Theme.ghost, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help(L10n.shared.t("uninst.resetHint"))
+                }
                 Spacer()
                 Button(L10n.shared.t("btn.cancel")) { model.appsState.showUninstallSheet = false }
                     .buttonStyle(.plain)
@@ -1267,6 +1283,90 @@ struct StartupView: View {
         .task {
             if model.startup.status == .idle { await model.scanStartup() }
         }
+    }
+}
+
+// MARK: - Расширения системы
+
+struct ExtensionsView: View {
+    @Environment(CleanerViewModel.self) private var model
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    PageHeader(title: L10n.shared.t("sec.extensions"),
+                               subtitle: L10n.shared.t("sub.extensions"))
+                    Spacer()
+                    ScanButton(title: L10n.shared.t("btn.scan"),
+                               isScanning: model.extensionsState.status == .scanning) {
+                        Task { await model.scanExtensions() }
+                    }
+                }
+
+                // Баннер-пояснение
+                HStack(spacing: 12) {
+                    IconTile(symbol: "puzzlepiece.extension", color: Theme.accent, size: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.shared.t("ext.banner.t")).font(.callout.weight(.semibold))
+                        Text(L10n.shared.t("ext.banner.s"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.25)))
+
+                switch model.extensionsState.status {
+                case .idle:
+                    EmptyState(icon: "puzzlepiece.extension", iconColor: Theme.accent,
+                               title: L10n.shared.t("empty.pressScan"))
+                case .scanning:
+                    Card { HStack { ProgressView().controlSize(.small); Text(L10n.shared.t("misc.scanning")) }.padding(16) }
+                case .done where model.extensionsState.groups.isEmpty:
+                    EmptyState(icon: "checkmark", title: L10n.shared.t("ext.empty.t"),
+                               subtitle: L10n.shared.t("ext.empty.s"))
+                case .done:
+                    ForEach(model.extensionsState.groups) { group in
+                        ExtensionGroupCard(group: group)
+                    }
+                    Text(L10n.shared.f("ext.footer", model.extensionsState.count,
+                                       Format.bytes(model.extensionsState.total)))
+                        .font(.caption).foregroundStyle(.tertiary)
+                default:
+                    EmptyView()
+                }
+            }
+            .padding(24)
+            .padding(.bottom, 70)
+        }
+        .task {
+            if model.extensionsState.status == .idle { await model.scanExtensions() }
+        }
+    }
+}
+
+struct ExtensionGroupCard: View {
+    let group: ExtensionGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L10n.shared.t(group.key)).font(.callout.weight(.semibold))
+                Text(L10n.shared.f("misc.filesCount", group.items.count, Format.bytes(group.total)))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                SelectionToolbar(paths: group.items.map(\.path))
+            }
+            ForEach(group.items) { item in
+                SelectableRow(path: item.path, name: item.name, size: item.size,
+                              isDir: item.isDir, note: item.note, date: item.mtime)
+            }
+        }
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
     }
 }
 

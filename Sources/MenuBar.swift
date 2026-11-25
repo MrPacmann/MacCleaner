@@ -54,9 +54,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // MARK: Данные
 
+    /// Размер Корзины — считается в фоне, чтобы не тормозить открытие меню.
+    /// nil — ещё не посчитали или нет доступа.
+    private var trashSize: UInt64?
+
     private func refresh() {
         let caps = Scanner.volumeCapacities()
         statusItem?.button?.title = Format.bytes(caps.free)
+        Task {
+            let size = await Scanner.duSize(Scanner.trashDir)
+            self.trashSize = size > 0 ? size : nil
+        }
     }
 
     private func rebuildMenu(_ menu: NSMenu) {
@@ -67,6 +75,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             action: nil, keyEquivalent: "")
         info.isEnabled = false
         menu.addItem(info)
+        if let trashSize {
+            let trash = NSMenuItem(
+                title: L10n.shared.f("menubar.trash", Format.bytes(trashSize)),
+                action: nil, keyEquivalent: "")
+            trash.isEnabled = false
+            menu.addItem(trash)
+        }
         menu.addItem(.separator())
 
         let open = NSMenuItem(title: L10n.shared.t("menubar.open"),

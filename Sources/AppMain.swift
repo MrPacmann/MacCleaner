@@ -141,8 +141,10 @@ struct ContentView: View {
         case .downloads: DownloadsView()
         case .junk: JunkView()
         case .startup: StartupView()
+        case .extensions: ExtensionsView()
         case .trash: TrashView()
         case .history: HistoryView()
+        case .monitor: MonitorView()
         case .settings: SettingsView()
         }
     }

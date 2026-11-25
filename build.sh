@@ -24,6 +24,8 @@ fi
 
 echo "→ Подписываю…"
 xattr -cr "$APP"
+# Finder любит оставлять на бандле com.apple.FinderInfo — codesign его не переваривает
+xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
 if security find-identity -v -p codesigning | grep -q "MacCleaner Dev"; then
   # Стабильная локальная подпись: macOS (TCC) запоминает выданные
   # разрешения между сборками и обновлениями.
