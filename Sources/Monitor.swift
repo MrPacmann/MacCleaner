@@ -271,6 +271,7 @@ struct MonitorView: View {
                     batteryCard
                     thermalCard
                     diskCard
+                    networkCard
                     systemCard
                 }
 
@@ -367,6 +368,24 @@ struct MonitorView: View {
             MiniBar(value: model.monitor.diskTotal > 0
                     ? 1.0 - Double(model.monitor.diskFree) / Double(model.monitor.diskTotal) : 0,
                     color: Theme.accent)
+        }
+    }
+
+    private var networkCard: some View {
+        MonitorCard(icon: "network", title: L10n.shared.t("mb.network"),
+                    color: Color(red: 0.60, green: 0.55, blue: 0.97)) {
+            HStack(spacing: 16) {
+                Text(L10n.shared.f("mb.down", Format.bytes(model.monitor.netDown)))
+                Text(L10n.shared.f("mb.up", Format.bytes(model.monitor.netUp)))
+            }
+            .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+            if let ip = model.monitor.localIP {
+                Text(L10n.shared.f("mb.ip", ip))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(L10n.shared.t("mb.offline"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
