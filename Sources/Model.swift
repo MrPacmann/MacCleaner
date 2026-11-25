@@ -73,6 +73,7 @@ final class L10n {
         "settings.installFailed": "Не удалось — перетащите вручную",
         "btn.install": "Установить",
         "settings.menuBar": "Иконка в меню-баре",
+        "settings.dockIcon": "Иконка в Dock",
         "menubar.free": "Свободно %@ из %@",
         "menubar.open": "Открыть Mac Cleaner",
         "menubar.quit": "Выйти",
@@ -299,6 +300,7 @@ final class L10n {
         "settings.installFailed": "Failed — drag it manually",
         "btn.install": "Install",
         "settings.menuBar": "Menu bar icon",
+        "settings.dockIcon": "Dock icon",
         "menubar.free": "%@ free of %@",
         "menubar.open": "Open Mac Cleaner",
         "menubar.quit": "Quit",
@@ -835,6 +837,28 @@ final class CleanerViewModel {
         didSet {
             UserDefaults.standard.set(menuBarEnabled, forKey: "menuBarEnabled")
             MenuBarController.shared.apply(enabled: menuBarEnabled)
+        }
+    }
+
+    /// Иконка приложения в Dock (по умолчанию включена).
+    /// Выключается — приложение становится фоновым агентом (.accessory):
+    /// висит без иконки в Dock, управление через меню-бар.
+    /// Чтобы приложение не потерялось, меню-бар при этом включаем принудительно.
+    var showDockIcon: Bool = UserDefaults.standard.object(forKey: "showDockIcon") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showDockIcon, forKey: "showDockIcon")
+            if !showDockIcon && !menuBarEnabled {
+                menuBarEnabled = true
+            }
+            applyDockPolicy()
+        }
+    }
+
+    /// Применяет режим видимости в Dock (зовётся из didSet и при запуске)
+    func applyDockPolicy() {
+        NSApp.setActivationPolicy(showDockIcon ? .regular : .accessory)
+        if !showDockIcon {
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 

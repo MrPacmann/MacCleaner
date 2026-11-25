@@ -13,6 +13,7 @@ struct MacCleanerApp: App {
                 .preferredColorScheme(model.colorScheme)
                 .task {
                     model.loadHistory()
+                    model.applyDockPolicy()
                     MenuBarController.shared.apply(enabled: model.menuBarEnabled)
                     Task { await UpdateChecker.shared.check(silent: true) }
                 }

@@ -1662,6 +1662,17 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
+                        Divider()
+                        HStack {
+                            Text(L10n.shared.t("settings.dockIcon"))
+                                .font(.callout).foregroundStyle(.secondary)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { model.showDockIcon },
+                                set: { model.showDockIcon = $0 }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
                     }
                     .padding(16)
                 }
