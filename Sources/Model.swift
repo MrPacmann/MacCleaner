@@ -244,6 +244,9 @@ final class L10n {
         "mon.uptime": "Аптайм: %@",
         "mon.mac": "macOS %@ · %@",
         "mon.freeOf": "%@ свободно из %@",
+        "mb.network": "Сеть",
+        "mb.ip": "Локальный IP: %@",
+        "mb.offline": "Нет соединения",
     ]
 
     static let en: [String: String] = [
@@ -467,6 +470,9 @@ final class L10n {
         "mon.uptime": "Uptime: %@",
         "mon.mac": "macOS %@ · %@",
         "mon.freeOf": "%@ free of %@",
+        "mb.network": "Network",
+        "mb.ip": "Local IP: %@",
+        "mb.offline": "Offline",
     ]
 }
 

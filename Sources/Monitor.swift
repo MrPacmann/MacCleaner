@@ -29,6 +29,11 @@ final class MonitorState {
     var uptime: TimeInterval = 0
     var diskFree: UInt64 = 0
     var diskTotal: UInt64 = 0
+    /// Локальный IP (en0). nil — нет соединения
+    var localIP: String? = nil
+    /// Размер Корзины (считается редко — du по большой Корзине медленный)
+    var trashSize: UInt64? = nil
+    private var tick = 0
 
     let macOSVersion: String = ProcessInfo.processInfo.operatingSystemVersionString
         .replacingOccurrences(of: "Version ", with: "")
@@ -64,6 +69,35 @@ final class MonitorState {
         let caps = Scanner.volumeCapacities()
         diskFree = caps.free
         diskTotal = caps.total
+        localIP = Self.localIPv4()
+
+        // Корзина — раз в минуту (каждый 30-й тик по 2 секунды)
+        tick += 1
+        if tick % 30 == 1 {
+            Task { [weak self] in
+                let size = await Scanner.duSize(Scanner.trashDir)
+                self?.trashSize = size > 0 ? size : nil
+            }
+        }
+    }
+
+    /// IPv4-адрес на en0 (Wi-Fi/Ethernet у ноутбуков и десктопов Apple)
+    private static func localIPv4() -> String? {
+        var iflist: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&iflist) == 0, let first = iflist else { return nil }
+        defer { freeifaddrs(iflist) }
+        var result: String?
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            let family = ptr.pointee.ifa_addr.pointee.sa_family
+            let flags = Int32(ptr.pointee.ifa_flags)
+            guard name == "en0", family == UInt8(AF_INET), (flags & IFF_UP) != 0 else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            getnameinfo(ptr.pointee.ifa_addr, socklen_t(ptr.pointee.ifa_addr.pointee.sa_len),
+                        &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+            result = String(cString: host)
+        }
+        return result
     }
 
     // MARK: Низкоуровневые замеры

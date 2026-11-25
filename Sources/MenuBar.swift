@@ -1,15 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// Иконка в меню-баре: свободное место на диске + меню
-/// («Открыть Mac Cleaner», «Выйти»). Обновляется раз в минуту
-/// и при открытии меню. Включается/выключается в настройках.
+/// Иконка приложения в меню-баре. По клику — popover-панель
+/// с живыми метриками (CPU, память, диск, батарея, сеть)
+/// и кнопками «Открыть» / «Выйти». Включается в настройках.
 @MainActor
-final class MenuBarController: NSObject, NSMenuDelegate {
+final class MenuBarController: NSObject {
     static let shared = MenuBarController()
 
     private var statusItem: NSStatusItem?
-    private var refreshTimer: Timer?
+    private var popover: NSPopover?
+
+    /// Общий источник метрик для панели
+    let monitor = MonitorState()
 
     /// Главное окно приложения (isReleasedWhenClosed = false —
     /// переоткрываем его же после закрытия крестиком)
@@ -19,84 +22,42 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if enabled {
             if statusItem == nil { create() }
         } else if let item = statusItem {
+            popover?.performClose(nil)
+            popover = nil
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
-            refreshTimer?.invalidate()
-            refreshTimer = nil
         }
     }
 
     private func create() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "internaldrive",
-                                   accessibilityDescription: "Mac Cleaner")
-            button.imagePosition = .imageLeading
-            button.font = NSFont.monospacedDigitSystemFont(
-                ofSize: NSFont.systemFontSize, weight: .regular)
+            let icon = NSApp.applicationIconImage.copy() as? NSImage
+            icon?.size = NSSize(width: 19, height: 19)
+            button.image = icon
+            button.imagePosition = .imageOnly
+            button.action = #selector(togglePopover)
+            button.target = self
         }
-        let menu = NSMenu()
-        menu.delegate = self
-        item.menu = menu
         statusItem = item
-        refresh()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem?.button else { return }
+        if let popover, popover.isShown {
+            popover.performClose(nil)
+            return
         }
+        let pop = NSPopover()
+        pop.behavior = .transient          // закрывается по клику мимо
+        pop.animates = true
+        pop.contentViewController = NSHostingController(rootView: MenuBarPanelView(monitor: monitor))
+        pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover = pop
     }
 
-    // MARK: NSMenuDelegate
-
-    func menuWillOpen(_ menu: NSMenu) {
-        refresh()
-        rebuildMenu(menu)
-    }
-
-    // MARK: Данные
-
-    /// Размер Корзины — считается в фоне, чтобы не тормозить открытие меню.
-    /// nil — ещё не посчитали или нет доступа.
-    private var trashSize: UInt64?
-
-    private func refresh() {
-        let caps = Scanner.volumeCapacities()
-        statusItem?.button?.title = Format.bytes(caps.free)
-        Task {
-            let size = await Scanner.duSize(Scanner.trashDir)
-            self.trashSize = size > 0 ? size : nil
-        }
-    }
-
-    private func rebuildMenu(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let caps = Scanner.volumeCapacities()
-        let info = NSMenuItem(
-            title: L10n.shared.f("menubar.free", Format.bytes(caps.free), Format.bytes(caps.total)),
-            action: nil, keyEquivalent: "")
-        info.isEnabled = false
-        menu.addItem(info)
-        if let trashSize {
-            let trash = NSMenuItem(
-                title: L10n.shared.f("menubar.trash", Format.bytes(trashSize)),
-                action: nil, keyEquivalent: "")
-            trash.isEnabled = false
-            menu.addItem(trash)
-        }
-        menu.addItem(.separator())
-
-        let open = NSMenuItem(title: L10n.shared.t("menubar.open"),
-                              action: #selector(openApp), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: L10n.shared.t("menubar.quit"),
-                              action: #selector(quitApp), keyEquivalent: "")
-        quit.target = self
-        menu.addItem(quit)
-    }
-
-    @objc private func openApp() {
+    func openApp() {
+        popover?.performClose(nil)
         NSApp.activate(ignoringOtherApps: true)
         if let w = mainWindow ?? NSApp.windows.first(where: { $0.canBecomeMain }) {
             w.deminiaturize(nil)
@@ -104,8 +65,168 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func quitApp() {
+    func quitApp() {
         NSApp.terminate(nil)
+    }
+}
+
+// MARK: - Панель метрик (popover)
+
+struct MenuBarPanelView: View {
+    let monitor: MonitorState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            cpuSection
+            divider
+            memorySection
+            divider
+            diskSection
+            divider
+            batterySection
+            divider
+            networkSection
+            divider
+            footer
+        }
+        .padding(.vertical, 6)
+        .frame(width: 292)
+        .task {
+            while !Task.isCancelled {
+                monitor.refresh()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private var divider: some View {
+        Divider().padding(.vertical, 6)
+    }
+
+    // MARK: Секции
+
+    private var cpuSection: some View {
+        PanelSection(icon: "cpu", iconColor: Color(red: 0.55, green: 0.72, blue: 0.95),
+                     title: "\(L10n.shared.t("mon.cpu")): \(Int(monitor.cpuUsage * 100))%") {
+            Text(L10n.shared.f("mon.loadAvg",
+                               String(format: "%.2f", monitor.loadAvg.0),
+                               String(format: "%.2f", monitor.loadAvg.1),
+                               String(format: "%.2f", monitor.loadAvg.2)))
+            Text(L10n.shared.f("mon.cores", monitor.coreCount))
+        }
+    }
+
+    private var memorySection: some View {
+        let pct = monitor.memTotal > 0 ? Int(Double(monitor.memUsed) / Double(monitor.memTotal) * 100) : 0
+        return PanelSection(icon: "memorychip", iconColor: Color(red: 0.42, green: 0.84, blue: 0.72),
+                            title: "\(L10n.shared.t("mon.memory")): \(pct)%") {
+            Text(L10n.shared.f("mon.usedOf", Format.bytes(monitor.memUsed), Format.bytes(monitor.memTotal)))
+            Text(L10n.shared.f("mon.swap", Format.bytes(monitor.swapUsed)))
+        }
+    }
+
+    private var diskSection: some View {
+        let usedPct = monitor.diskTotal > 0
+            ? Int((1.0 - Double(monitor.diskFree) / Double(monitor.diskTotal)) * 100) : 0
+        return PanelSection(icon: "internaldrive", iconColor: Theme.accent,
+                            title: "\(L10n.shared.t("mon.disk")): \(usedPct)%") {
+            Text(L10n.shared.f("mon.freeOf", Format.bytes(monitor.diskFree), Format.bytes(monitor.diskTotal)))
+            MiniBar(value: Double(usedPct) / 100, color: Theme.accent)
+                .padding(.top, 2)
+            if let trash = monitor.trashSize {
+                Text(L10n.shared.f("menubar.trash", Format.bytes(trash)))
+            }
+        }
+    }
+
+    private var batterySection: some View {
+        PanelSection(icon: monitor.hasBattery
+                     ? (monitor.batteryCharging ? "battery.100percent.bolt" : "battery.75percent")
+                     : "bolt.fill",
+                     iconColor: Color(red: 0.86, green: 0.89, blue: 0.45),
+                     title: monitor.hasBattery
+                        ? "\(L10n.shared.t("mon.battery")): \(monitor.batteryLevel)%"
+                        : L10n.shared.t("mon.battery")) {
+            if monitor.hasBattery {
+                Text(L10n.shared.t(monitor.batteryCharging ? "mon.charging" : "mon.discharging"))
+            } else {
+                Text(L10n.shared.t("mon.noBattery"))
+            }
+            Text("\(L10n.shared.t("mon.thermal")): \(monitor.thermalTitle)")
+        }
+    }
+
+    private var networkSection: some View {
+        PanelSection(icon: "network", iconColor: Color(red: 0.60, green: 0.55, blue: 0.97),
+                     title: L10n.shared.t("mb.network")) {
+            if let ip = monitor.localIP {
+                Text(L10n.shared.f("mb.ip", ip))
+            } else {
+                Text(L10n.shared.t("mb.offline"))
+            }
+        }
+    }
+
+    // MARK: Кнопки
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Button {
+                MenuBarController.shared.openApp()
+            } label: {
+                Text(L10n.shared.t("menubar.open"))
+                    .font(.callout.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 9))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                MenuBarController.shared.quitApp()
+            } label: {
+                Text(L10n.shared.t("menubar.quit"))
+                    .font(.callout.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 2)
+        .padding(.bottom, 6)
+    }
+}
+
+/// Одна секция панели: иконка слева, заголовок и строки деталей
+struct PanelSection<Content: View>: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundStyle(iconColor)
+                .frame(width: 34, alignment: .center)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                content
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
     }
 }
 
