@@ -15,6 +15,12 @@ final class MenuBarController: NSObject {
     /// Через сколько секунд панель закрывается сама
     private let autoCloseAfter: TimeInterval = 10
 
+    // Анимация иконки: мусорка покачивается, чем выше загрузка CPU — тем быстрее
+    private var animTimer: Timer?
+    private var animStart = Date()
+    private var animTickCount = 0
+    private var baseIcon: NSImage?
+
     /// Общий источник метрик для панели
     let monitor = MonitorState()
 
@@ -28,6 +34,8 @@ final class MenuBarController: NSObject {
         } else if let item = statusItem {
             closePopover()
             popover = nil
+            animTimer?.invalidate()
+            animTimer = nil
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
         }
@@ -35,20 +43,91 @@ final class MenuBarController: NSObject {
 
     private func create() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let glyph = Self.trashGlyph(size: 22)
+        baseIcon = glyph
         if let button = item.button {
-            // Ч/б версия иконки приложения (генерируется в Resources/MenuBarIcon.png)
-            var icon: NSImage?
-            if let path = Bundle.main.path(forResource: "MenuBarIcon", ofType: "png") {
-                icon = NSImage(contentsOfFile: path)
-            }
-            if icon == nil { icon = NSApp.applicationIconImage.copy() as? NSImage }
-            icon?.size = NSSize(width: 19, height: 19)
-            button.image = icon
+            button.image = glyph
             button.imagePosition = .imageOnly
             button.action = #selector(togglePopover)
             button.target = self
         }
         statusItem = item
+        animStart = Date()
+        animTimer?.invalidate()
+        animTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.animTick() }
+        }
+    }
+
+    /// Кадр анимации: раз в 2 с обновляем метрики, мусорку качаем
+    /// синусом; частота и амплитуда растут с загрузкой CPU.
+    private func animTick() {
+        animTickCount += 1
+        if animTickCount % 20 == 1 { monitor.refresh() }
+        guard let button = statusItem?.button, let baseIcon else { return }
+        let t = Date().timeIntervalSince(animStart)
+        let cpu = monitor.cpuUsage                      // 0…1
+        let freq = 0.5 + cpu * 3.0                      // Гц
+        let amp = 6.0 + cpu * 8.0                       // градусы
+        let angle = sin(2 * .pi * freq * t) * amp
+        button.image = Self.rotated(baseIcon, degrees: angle)
+    }
+
+    // MARK: Иконка-мусорка (вектор, прозрачный фон, template → ч/б под тему меню-бара)
+
+    static func trashGlyph(size: CGFloat) -> NSImage {
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            NSColor.black.setFill()
+            let s = rect.width / 22.0
+            // Ручка крышки
+            NSBezierPath(roundedRect: NSRect(x: 9 * s, y: 17.6 * s, width: 4 * s, height: 1.8 * s),
+                         xRadius: 0.9 * s, yRadius: 0.9 * s).fill()
+            // Крышка
+            NSBezierPath(roundedRect: NSRect(x: 4 * s, y: 15 * s, width: 14 * s, height: 1.8 * s),
+                         xRadius: 0.9 * s, yRadius: 0.9 * s).fill()
+            // Корпус: трапеция со скруглённым низом
+            let body = NSBezierPath()
+            body.move(to: NSPoint(x: 5.5 * s, y: 13.5 * s))
+            body.line(to: NSPoint(x: 16.5 * s, y: 13.5 * s))
+            body.line(to: NSPoint(x: 15.3 * s, y: 4.5 * s))
+            body.curve(to: NSPoint(x: 13.3 * s, y: 3 * s),
+                       controlPoint1: NSPoint(x: 15.1 * s, y: 3.2 * s),
+                       controlPoint2: NSPoint(x: 14.5 * s, y: 3 * s))
+            body.line(to: NSPoint(x: 8.7 * s, y: 3 * s))
+            body.curve(to: NSPoint(x: 6.7 * s, y: 4.5 * s),
+                       controlPoint1: NSPoint(x: 7.5 * s, y: 3 * s),
+                       controlPoint2: NSPoint(x: 6.9 * s, y: 3.2 * s))
+            body.close()
+            // Прорези (вырезаются правилом even-odd)
+            for cx in [8.6, 11.0, 13.4] {
+                body.append(NSBezierPath(roundedRect: NSRect(x: (cx - 0.6) * s, y: 5.5 * s,
+                                                             width: 1.2 * s, height: 6.5 * s),
+                                         xRadius: 0.6 * s, yRadius: 0.6 * s))
+            }
+            body.windingRule = .evenOdd
+            body.fill()
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
+    /// Поворот иконки на угол (для анимации покачивания)
+    static func rotated(_ image: NSImage, degrees: CGFloat) -> NSImage {
+        let size = image.size
+        let out = NSImage(size: size, flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current else { return false }
+            ctx.imageInterpolation = .high
+            let t = NSAffineTransform()
+            t.translateX(by: rect.midX, yBy: rect.midY)
+            t.rotate(byDegrees: degrees)
+            t.translateX(by: -rect.midX, yBy: -rect.midY)
+            t.concat()
+            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        out.isTemplate = true
+        return out
     }
 
     @objc private func togglePopover() {
