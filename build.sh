@@ -21,6 +21,10 @@ cp Info.plist "$APP/Contents/Info.plist"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Ч/б иконка для меню-бара
+if [ -f Resources/MenuBarIcon.png ]; then
+  cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
+fi
 
 echo "→ Подписываю…"
 xattr -cr "$APP"

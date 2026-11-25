@@ -10,6 +10,10 @@ final class MenuBarController: NSObject {
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    /// Таймер автоскрытия панели
+    private var closeTimer: Timer?
+    /// Через сколько секунд панель закрывается сама
+    private let autoCloseAfter: TimeInterval = 10
 
     /// Общий источник метрик для панели
     let monitor = MonitorState()
@@ -22,7 +26,7 @@ final class MenuBarController: NSObject {
         if enabled {
             if statusItem == nil { create() }
         } else if let item = statusItem {
-            popover?.performClose(nil)
+            closePopover()
             popover = nil
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
@@ -32,7 +36,12 @@ final class MenuBarController: NSObject {
     private func create() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            let icon = NSApp.applicationIconImage.copy() as? NSImage
+            // Ч/б версия иконки приложения (генерируется в Resources/MenuBarIcon.png)
+            var icon: NSImage?
+            if let path = Bundle.main.path(forResource: "MenuBarIcon", ofType: "png") {
+                icon = NSImage(contentsOfFile: path)
+            }
+            if icon == nil { icon = NSApp.applicationIconImage.copy() as? NSImage }
             icon?.size = NSSize(width: 19, height: 19)
             button.image = icon
             button.imagePosition = .imageOnly
@@ -45,7 +54,7 @@ final class MenuBarController: NSObject {
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
         if let popover, popover.isShown {
-            popover.performClose(nil)
+            closePopover()
             return
         }
         let pop = NSPopover()
@@ -54,10 +63,21 @@ final class MenuBarController: NSObject {
         pop.contentViewController = NSHostingController(rootView: MenuBarPanelView(monitor: monitor))
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover = pop
+        // Автоскрытие через autoCloseAfter секунд
+        closeTimer?.invalidate()
+        closeTimer = Timer.scheduledTimer(withTimeInterval: autoCloseAfter, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.closePopover() }
+        }
+    }
+
+    private func closePopover() {
+        closeTimer?.invalidate()
+        closeTimer = nil
+        popover?.performClose(nil)
     }
 
     func openApp() {
-        popover?.performClose(nil)
+        closePopover()
         NSApp.activate(ignoringOtherApps: true)
         if let w = mainWindow ?? NSApp.windows.first(where: { $0.canBecomeMain }) {
             w.deminiaturize(nil)
@@ -175,8 +195,11 @@ struct MenuBarPanelView: View {
                 MenuBarController.shared.openApp()
             } label: {
                 Text(L10n.shared.t("menubar.open"))
-                    .font(.callout.weight(.medium))
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 7)
                     .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 9))
                     .foregroundStyle(.white)
@@ -187,8 +210,11 @@ struct MenuBarPanelView: View {
                 MenuBarController.shared.quitApp()
             } label: {
                 Text(L10n.shared.t("menubar.quit"))
-                    .font(.callout.weight(.medium))
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 7)
                     .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
                     .foregroundStyle(.secondary)
