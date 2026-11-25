@@ -272,8 +272,10 @@ struct MonitorView: View {
                     thermalCard
                     diskCard
                     networkCard
-                    systemCard
                 }
+
+                // «Система» — широкой полосой на всю ширину
+                systemCard
 
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
@@ -389,15 +391,28 @@ struct MonitorView: View {
         }
     }
 
+    /// Широкая полоса на всю ширину под сеткой
     private var systemCard: some View {
-        MonitorCard(icon: "desktopcomputer", title: L10n.shared.t("mon.system"),
-                    color: Color(red: 0.60, green: 0.55, blue: 0.97)) {
+        HStack(spacing: 10) {
+            Image(systemName: "desktopcomputer")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(red: 0.60, green: 0.55, blue: 0.97))
+            Text(L10n.shared.t("mon.system"))
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
             Text(L10n.shared.f("mon.mac", model.monitor.macOSVersion, model.monitor.chipName))
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
+            Text("·")
+                .foregroundStyle(.tertiary)
             Text(L10n.shared.f("mon.uptime", model.monitor.uptimeText))
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.stroke))
     }
 }
 
