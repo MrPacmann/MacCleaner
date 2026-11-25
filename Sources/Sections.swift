@@ -1662,6 +1662,24 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
+                        if model.menuBarEnabled {
+                            Divider()
+                            HStack {
+                                Text(L10n.shared.t("settings.mbicon"))
+                                    .font(.callout).foregroundStyle(.secondary)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { model.menuBarIconStyle },
+                                    set: { model.menuBarIconStyle = $0 })) {
+                                    ForEach(MenuBarIconStyle.allCases) { style in
+                                        Text(L10n.shared.t(style.titleKey)).tag(style)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(width: 190)
+                            }
+                        }
                         Divider()
                         HStack {
                             Text(L10n.shared.t("settings.dockIcon"))

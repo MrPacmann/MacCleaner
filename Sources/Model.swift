@@ -74,6 +74,10 @@ final class L10n {
         "btn.install": "Установить",
         "settings.menuBar": "Иконка в меню-баре",
         "settings.dockIcon": "Иконка в Dock",
+        "settings.mbicon": "Стиль иконки",
+        "mbicon.trash": "Мусорка", "mbicon.rotor": "Ротор двигателя",
+        "mbicon.coffee": "Кофе", "mbicon.drop": "Капля",
+        "mbicon.newton": "Маятник Ньютона",
         "menubar.free": "Свободно %@ из %@",
         "menubar.open": "Открыть Mac Cleaner",
         "menubar.quit": "Выйти",
@@ -301,6 +305,10 @@ final class L10n {
         "btn.install": "Install",
         "settings.menuBar": "Menu bar icon",
         "settings.dockIcon": "Dock icon",
+        "settings.mbicon": "Icon style",
+        "mbicon.trash": "Trash", "mbicon.rotor": "Engine rotor",
+        "mbicon.coffee": "Coffee", "mbicon.drop": "Drop",
+        "mbicon.newton": "Newton's cradle",
         "menubar.free": "%@ free of %@",
         "menubar.open": "Open Mac Cleaner",
         "menubar.quit": "Quit",
@@ -837,6 +845,15 @@ final class CleanerViewModel {
         didSet {
             UserDefaults.standard.set(menuBarEnabled, forKey: "menuBarEnabled")
             MenuBarController.shared.apply(enabled: menuBarEnabled)
+        }
+    }
+
+    /// Стиль анимированной иконки меню-бара
+    var menuBarIconStyle: MenuBarIconStyle =
+        MenuBarIconStyle(rawValue: UserDefaults.standard.string(forKey: "menuBarIconStyle") ?? "trash") ?? .trash {
+        didSet {
+            UserDefaults.standard.set(menuBarIconStyle.rawValue, forKey: "menuBarIconStyle")
+            MenuBarController.shared.iconStyle = menuBarIconStyle
         }
     }
 
