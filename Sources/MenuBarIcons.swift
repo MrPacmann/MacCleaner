@@ -7,7 +7,7 @@ import AppKit
 // Скорость анимации зависит от загрузки CPU — как в RunCat.
 
 enum MenuBarIconStyle: String, CaseIterable, Identifiable {
-    case trash, rotor, coffee, drop, newton
+    case trash, rotor, coffee, drop, newton, sheep, radiation
 
     var id: String { rawValue }
     var titleKey: String { "mbicon." + rawValue }
@@ -31,6 +31,10 @@ enum MenuBarIconStyle: String, CaseIterable, Identifiable {
             return dropImage(t: t, cpu: cpu)
         case .newton:
             return newtonImage(t: t, cpu: cpu)
+        case .sheep:
+            return sheepImage(t: t, cpu: cpu)
+        case .radiation:
+            return radiationImage(t: t, cpu: cpu)
         }
     }
 
@@ -224,6 +228,78 @@ enum MenuBarIconStyle: String, CaseIterable, Identifiable {
                 controlPoint2: NSPoint(x: cx - 1.9 * s, y: cy + 1.7 * s))
         p.close()
         return p
+    }
+
+    // MARK: Овечка — бежит и перепрыгивает через забор
+
+    private func sheepImage(t: TimeInterval, cpu: Double) -> NSImage {
+        let period = 1.0 / (0.45 + cpu * 2.0)
+        let p = t.truncatingRemainder(dividingBy: period) / period   // 0…1
+        return Self.render { s in
+            // Забор: две стойки и перекладина
+            NSBezierPath(rect: NSRect(x: 9.6 * s, y: 3 * s, width: 1.0 * s, height: 6.5 * s)).fill()
+            NSBezierPath(rect: NSRect(x: 12.4 * s, y: 3 * s, width: 1.0 * s, height: 6.5 * s)).fill()
+            NSBezierPath(rect: NSRect(x: 8.8 * s, y: 8.2 * s, width: 5.4 * s, height: 1.2 * s)).fill()
+            // Бег слева направо по кругу
+            let x = (-2 + p * 26) * s
+            // Прыжок дугой в районе забора
+            var y = 7.0 * s
+            let xu = Double(x / s)
+            let jStart = 7.0, jEnd = 14.5
+            let jumping = xu > jStart && xu < jEnd
+            if jumping {
+                let jp = (xu - jStart) / (jEnd - jStart)
+                y += CGFloat(sin(.pi * jp)) * 6.0 * s
+            }
+            // Тело — облачко из трёх кругов
+            for (dx, dy, r) in [(-1.8, 0.0, 2.0), (0.0, 0.9, 2.3), (1.8, 0.0, 2.0)] {
+                let rr = CGFloat(r) * s
+                NSBezierPath(ovalIn: NSRect(x: x + CGFloat(dx) * s - rr,
+                                            y: y + CGFloat(dy) * s - rr,
+                                            width: rr * 2, height: rr * 2)).fill()
+            }
+            // Голова спереди (по направлению бега)
+            NSBezierPath(ovalIn: NSRect(x: x + 3.0 * s - 1.3 * s, y: y + 0.7 * s - 1.3 * s,
+                                        width: 2.6 * s, height: 2.6 * s)).fill()
+            // Ноги — только на земле; в прыжке поджаты
+            if !jumping {
+                NSBezierPath(rect: NSRect(x: x - 1.6 * s, y: y - 4.2 * s,
+                                          width: 0.9 * s, height: 2.6 * s)).fill()
+                NSBezierPath(rect: NSRect(x: x + 0.7 * s, y: y - 4.2 * s,
+                                          width: 0.9 * s, height: 2.6 * s)).fill()
+            }
+        }
+    }
+
+    // MARK: Радиация — трефоил вращается
+
+    private func radiationImage(t: TimeInterval, cpu: Double) -> NSImage {
+        let theta = 360.0 * (0.3 + cpu * 2.7) * t
+        return Self.render { s in
+            let c = NSPoint(x: 11 * s, y: 11 * s)
+            let r0 = 3.2 * s, r1 = 8.8 * s
+            for i in 0..<3 {
+                let center = 90.0 + Double(i) * 120.0 + theta
+                let a0 = center - 30, a1 = center + 30
+                let blade = NSBezierPath()
+                blade.move(to: Self.polar(c, r0, a0))
+                blade.line(to: Self.polar(c, r1, a0))
+                blade.appendArc(withCenter: c, radius: r1, startAngle: a0, endAngle: a1)
+                blade.line(to: Self.polar(c, r0, a1))
+                blade.appendArc(withCenter: c, radius: r0, startAngle: a1, endAngle: a0, clockwise: true)
+                blade.close()
+                blade.fill()
+            }
+            // Центральный круг
+            NSBezierPath(ovalIn: NSRect(x: c.x - 2 * s, y: c.y - 2 * s,
+                                        width: 4 * s, height: 4 * s)).fill()
+        }
+    }
+
+    /// Точка на окружности: угол в градусах, 0° — вправо, против часовой
+    private static func polar(_ c: NSPoint, _ r: CGFloat, _ deg: Double) -> NSPoint {
+        let a = deg * .pi / 180
+        return NSPoint(x: c.x + r * CGFloat(cos(a)), y: c.y + r * CGFloat(sin(a)))
     }
 
     // MARK: Маятник Ньютона — крайние шары качаются по очереди
