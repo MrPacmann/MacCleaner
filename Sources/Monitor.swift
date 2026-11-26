@@ -90,14 +90,16 @@ final class MonitorState {
                 self?.trashSize = size > 0 ? size : nil
             }
         }
-        // Внешний IP — раз в 5 минут (лимит бесплатного API ~1000 запросов/день)
-        if tick % 150 == 1 {
-            refreshPublicIPNow()
-        }
     }
 
-    /// Запросить внешний IP прямо сейчас (открытие панели меню-бара и т.п.)
+    /// Внешний IP запрашиваем только по требованию (открытие панели меню-бара
+    /// или вкладки «Мониторинг»), с кэшем на минуту — так лимитов любого
+    /// сервиса хватает с запасом, и мы не зависим от фонового опроса.
+    private var lastPublicIPFetch: Date?
+
     func refreshPublicIPNow() {
+        if let last = lastPublicIPFetch, Date().timeIntervalSince(last) < 60 { return }
+        lastPublicIPFetch = Date()
         Task { [weak self] in
             let info = await Self.fetchPublicIP()
             self?.publicIP = info?.ip
@@ -105,16 +107,24 @@ final class MonitorState {
         }
     }
 
-    /// Внешний IP и страна через ipapi.co (бесплатно, https, без ключа).
-    /// Нет сети/сервис недоступен → nil, просто не показываем строку.
+    /// Внешний IP и страна. Основной: ipapi.co (IP + флаг страны).
+    /// Запасной: api.ipify.org (только IP, без жёстких лимитов).
     private static func fetchPublicIP() async -> (ip: String, flag: String)? {
-        guard let url = URL(string: "https://ipapi.co/json/"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ip = json["ip"] as? String
-        else { return nil }
-        let code = (json["country_code"] as? String) ?? ""
-        return (ip, Self.flagEmoji(code))
+        if let url = URL(string: "https://ipapi.co/json/"),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let ip = json["ip"] as? String {
+            let code = (json["country_code"] as? String) ?? ""
+            return (ip, Self.flagEmoji(code))
+        }
+        // Fallback без страны
+        if let url = URL(string: "https://api.ipify.org?format=json"),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let ip = json["ip"] as? String {
+            return (ip, "")
+        }
+        return nil
     }
 
     /// Код страны → флаг-эмодзи (DE → 🇩🇪)
@@ -343,7 +353,10 @@ struct MonitorView: View {
             }
             .padding(24)
         }
-        .onAppear { model.monitor.startAutoRefresh() }
+        .onAppear {
+            model.monitor.startAutoRefresh()
+            model.monitor.refreshPublicIPNow()
+        }
         .onDisappear { model.monitor.stopAutoRefresh() }
     }
 
