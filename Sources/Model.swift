@@ -254,6 +254,7 @@ final class L10n {
         "mb.ip": "Локальный IP: %@",
         "mb.down": "↓ %@/с",
         "mb.up": "↑ %@/с",
+        "mb.pubip": "Внешний IP: %@ %@",
         "mon.ram": "%@ ОЗУ",
         "mb.offline": "Нет соединения",
     ]
@@ -489,6 +490,7 @@ final class L10n {
         "mb.ip": "Local IP: %@",
         "mb.down": "↓ %@/s",
         "mb.up": "↑ %@/s",
+        "mb.pubip": "Public IP: %@ %@",
         "mon.ram": "%@ RAM",
         "mb.offline": "Offline",
     ]
@@ -1029,8 +1031,8 @@ final class CleanerViewModel {
     }
 
     /// Полное сканирование по кнопке + тихие сканы для «Что дальше?»
-    func scanWithRecommendations(force: Bool) async {
-        await runDeepScan(force: force)
+    func scanWithRecommendations(force: Bool, cancel: Scanner.CancelFlag? = nil) async {
+        await runDeepScan(force: force, cancel: cancel)
         if disk.phase == .done {
             if downloadsCategory.status == .idle { await scanJunk(downloadsCategory) }
             if trashCategory.status == .idle { await scanJunk(trashCategory) }
@@ -1039,18 +1041,22 @@ final class CleanerViewModel {
 
     /// Сканирование как отменяемая задача — кнопка «Отмена» в карточке прогресса
     private var deepScanTask: Task<Void, Never>?
+    private var deepScanCancel: Scanner.CancelFlag?
 
     func startDeepScan(force: Bool = false) {
         deepScanTask?.cancel()
-        deepScanTask = Task { await scanWithRecommendations(force: force) }
+        let flag = Scanner.CancelFlag()
+        deepScanCancel = flag
+        deepScanTask = Task { await scanWithRecommendations(force: force, cancel: flag) }
     }
 
     func cancelDeepScan() {
-        deepScanTask?.cancel()
+        deepScanCancel?.cancel()   // для detached-обхода внутри Scanner
+        deepScanTask?.cancel()     // для всего остального
         deepScanTask = nil
     }
 
-    func runDeepScan(force: Bool = false) async {
+    func runDeepScan(force: Bool = false, cancel: Scanner.CancelFlag? = nil) async {
         if disk.phase == .scanning { return }
         if disk.phase == .done && !force { return }
         disk.phase = .scanning
@@ -1062,7 +1068,7 @@ final class CleanerViewModel {
         disk.volumeTotal = caps.total
         disk.volumeFree = caps.free
         do {
-            let result = try await Scanner.deepScan { [weak self] count, path in
+            let result = try await Scanner.deepScan(cancel: cancel) { [weak self] count, path in
                 Task { @MainActor in
                     self?.disk.filesScanned = count
                     self?.disk.currentPath = path
@@ -1349,6 +1355,11 @@ enum Format {
     static func bytes(_ value: UInt64) -> String {
         if value == 0 { return "0 Б" }
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+    /// Для оперативной памяти — 1024-базовые единицы:
+    /// 24 ГиБ показываются как «24 ГБ», а не «25,77 GB»
+    static func memory(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
     }
     /// Со знаком: «+1,2 ГБ» / «−300 МБ» (для «Что выросло»)
     static func signedBytes(_ value: Int64) -> String {

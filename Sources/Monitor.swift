@@ -34,6 +34,9 @@ final class MonitorState {
     /// Текущая скорость сети, байт/сек (дельта счётчиков между тиками)
     var netDown: UInt64 = 0
     var netUp: UInt64 = 0
+    /// Внешний IP (как видит интернет) и флаг страны — чтобы было видно включённый VPN
+    var publicIP: String? = nil
+    var countryFlag: String? = nil
     /// Размер Корзины (считается редко — du по большой Корзине медленный)
     var trashSize: UInt64? = nil
     private var tick = 0
@@ -87,6 +90,34 @@ final class MonitorState {
                 self?.trashSize = size > 0 ? size : nil
             }
         }
+        // Внешний IP — раз в 5 минут (лимит бесплатного API ~1000 запросов/день)
+        if tick % 150 == 1 {
+            Task { [weak self] in
+                let info = await Self.fetchPublicIP()
+                self?.publicIP = info?.ip
+                self?.countryFlag = info?.flag
+            }
+        }
+    }
+
+    /// Внешний IP и страна через ipapi.co (бесплатно, https, без ключа).
+    /// Нет сети/сервис недоступен → nil, просто не показываем строку.
+    private static func fetchPublicIP() async -> (ip: String, flag: String)? {
+        guard let url = URL(string: "https://ipapi.co/json/"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ip = json["ip"] as? String
+        else { return nil }
+        let code = (json["country_code"] as? String) ?? ""
+        return (ip, Self.flagEmoji(code))
+    }
+
+    /// Код страны → флаг-эмодзи (DE → 🇩🇪)
+    private static func flagEmoji(_ code: String) -> String {
+        guard code.count == 2 else { return "" }
+        return code.uppercased().unicodeScalars
+            .compactMap { Unicode.Scalar(0x1F1E6 + $0.value - 65) }
+            .map(String.init).joined()
     }
 
     /// Один проход по интерфейсам: IPv4 на en0 + суммарные счётчики байт
@@ -335,7 +366,7 @@ struct MonitorView: View {
         let total = model.monitor.memTotal
         return MonitorCard(icon: "memorychip", title: L10n.shared.t("mon.memory"),
                            color: Color(red: 0.42, green: 0.84, blue: 0.72)) {
-            Text(L10n.shared.f("mon.usedOf", Format.bytes(used), Format.bytes(total)))
+            Text(L10n.shared.f("mon.usedOf", Format.memory(used), Format.memory(total)))
                 .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
             MiniBar(value: total > 0 ? Double(used) / Double(total) : 0,
                     color: Color(red: 0.42, green: 0.84, blue: 0.72))
@@ -402,6 +433,10 @@ struct MonitorView: View {
                 Text(L10n.shared.t("mb.offline"))
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let pub = model.monitor.publicIP {
+                Text(L10n.shared.f("mb.pubip", pub, model.monitor.countryFlag ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -424,7 +459,7 @@ struct MonitorView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text("·")
                 .foregroundStyle(.tertiary)
-            Text(L10n.shared.f("mon.ram", Format.bytes(model.monitor.memTotal)))
+            Text(L10n.shared.f("mon.ram", Format.memory(model.monitor.memTotal)))
                 .font(.caption).foregroundStyle(.secondary)
             Text("·")
                 .foregroundStyle(.tertiary)

@@ -159,8 +159,8 @@ struct MenuBarPanelView: View {
         let pct = monitor.memTotal > 0 ? Int(Double(monitor.memUsed) / Double(monitor.memTotal) * 100) : 0
         return PanelSection(icon: "memorychip", iconColor: Color(red: 0.42, green: 0.84, blue: 0.72),
                             title: "\(L10n.shared.t("mon.memory")): \(pct)%") {
-            Text(L10n.shared.f("mon.usedOf", Format.bytes(monitor.memUsed), Format.bytes(monitor.memTotal)))
-            Text(L10n.shared.f("mon.swap", Format.bytes(monitor.swapUsed)))
+            Text(L10n.shared.f("mon.usedOf", Format.memory(monitor.memUsed), Format.memory(monitor.memTotal)))
+            Text(L10n.shared.f("mon.swap", Format.memory(monitor.swapUsed)))
             MiniBar(value: Double(pct) / 100, color: Color(red: 0.42, green: 0.84, blue: 0.72))
                 .padding(.top, 2)
         }
@@ -205,6 +205,9 @@ struct MenuBarPanelView: View {
                      title: L10n.shared.t("mb.network")) {
             if let ip = monitor.localIP {
                 Text(L10n.shared.f("mb.ip", ip))
+                if let pub = monitor.publicIP {
+                    Text(L10n.shared.f("mb.pubip", pub, monitor.countryFlag ?? ""))
+                }
                 Text(L10n.shared.f("mb.down", Format.bytes(monitor.netDown)))
                 Text(L10n.shared.f("mb.up", Format.bytes(monitor.netUp)))
             } else {

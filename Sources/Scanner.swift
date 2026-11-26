@@ -32,6 +32,15 @@ enum Scanner {
     static let home = FileManager.default.homeDirectoryForCurrentUser.path
     static let trashDir = home + "/.Trash"
 
+    /// Флаг отмены для длинных обходов. Task.detached не наследует отмену
+    /// родительской задачи, поэтому флаг передаём явно.
+    final class CancelFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _cancelled = false
+        var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return _cancelled }
+        func cancel() { lock.lock(); _cancelled = true; lock.unlock() }
+    }
+
     // MARK: - Категории мусора (как в первой версии)
 
     static func scan(id: String) async throws -> ScanResult {
@@ -530,7 +539,8 @@ enum Scanner {
         return .other
     }
 
-    static func deepScan(progress: @Sendable @escaping (Int, String) -> Void) async throws -> DeepScanResult {
+    static func deepScan(progress: @Sendable @escaping (Int, String) -> Void,
+                         cancel: CancelFlag? = nil) async throws -> DeepScanResult {
         try await Task.detached(priority: .userInitiated) {
             var byCategory: [FileCategory: UInt64] = [:]
             var large: [LargeFile] = []
@@ -567,7 +577,7 @@ enum Scanner {
             }
 
             while let url = enumerator.nextObject() as? URL {
-                if Task.isCancelled { throw CancellationError() }
+                if Task.isCancelled || cancel?.cancelled == true { throw CancellationError() }
                 let path = url.path
                 // Не лезем в Корзину
                 if path.hasPrefix(trashDir) { enumerator.skipDescendants(); continue }
@@ -579,7 +589,7 @@ enum Scanner {
                     let name = url.lastPathComponent
                     // .app считаем целиком как «Приложения», внутрь не заходим
                     if name.hasSuffix(".app") {
-                        let size = duSizeSync(path)
+                        let size = duSizeSync(path, cancel: cancel)
                         byCategory[.apps, default: 0] += size
                         topByCategory[.apps, default: []].append(
                             LargeFile(path: path, name: name, size: size, access: nil, category: .apps, isDir: true))
@@ -589,7 +599,7 @@ enum Scanner {
                     }
                     // Тяжёлые дев-папки считаем целиком
                     if name == "node_modules" || name == "DerivedData" {
-                        let size = duSizeSync(path)
+                        let size = duSizeSync(path, cancel: cancel)
                         byCategory[.dev, default: 0] += size
                         topByCategory[.dev, default: []].append(
                             LargeFile(path: path, name: name, size: size, access: nil, category: .dev, isDir: true))
@@ -901,7 +911,7 @@ enum Scanner {
     }
 
     /// Синхронная версия — звать из уже фонового контекста (deepScan и т.п.)
-    static func duSizeSync(_ path: String) -> UInt64 {
+    static func duSizeSync(_ path: String, cancel: CancelFlag? = nil) -> UInt64 {
         let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .fileSizeKey,
                                       .isDirectoryKey, .isSymbolicLinkKey]
         let url = URL(fileURLWithPath: path)
@@ -923,7 +933,7 @@ enum Scanner {
         for case let u as URL in en {
             // Даём возможность отменить длинный обход
             n += 1
-            if n % 256 == 0 && Task.isCancelled { break }
+            if n % 256 == 0 && (Task.isCancelled || cancel?.cancelled == true) { break }
             guard let v = try? u.resourceValues(forKeys: Set(keys)) else { continue }
             if (v.isDirectory ?? false), (v.isSymbolicLink ?? false) { continue }
             total &+= sizeOf(v)
