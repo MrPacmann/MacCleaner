@@ -84,6 +84,9 @@ final class MenuBarController: NSObject {
         pop.contentViewController = NSHostingController(rootView: MenuBarPanelView(monitor: monitor))
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover = pop
+        // При открытии — свежие метрики и внешний IP сразу, без ожидания тика
+        monitor.refresh()
+        monitor.refreshPublicIPNow()
         // Автоскрытие через autoCloseAfter секунд
         closeTimer?.invalidate()
         closeTimer = Timer.scheduledTimer(withTimeInterval: autoCloseAfter, repeats: false) { [weak self] _ in

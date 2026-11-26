@@ -92,11 +92,16 @@ final class MonitorState {
         }
         // Внешний IP — раз в 5 минут (лимит бесплатного API ~1000 запросов/день)
         if tick % 150 == 1 {
-            Task { [weak self] in
-                let info = await Self.fetchPublicIP()
-                self?.publicIP = info?.ip
-                self?.countryFlag = info?.flag
-            }
+            refreshPublicIPNow()
+        }
+    }
+
+    /// Запросить внешний IP прямо сейчас (открытие панели меню-бара и т.п.)
+    func refreshPublicIPNow() {
+        Task { [weak self] in
+            let info = await Self.fetchPublicIP()
+            self?.publicIP = info?.ip
+            self?.countryFlag = info?.flag
         }
     }
 
