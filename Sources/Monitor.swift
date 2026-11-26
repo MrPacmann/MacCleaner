@@ -107,12 +107,22 @@ final class MonitorState {
         }
     }
 
-    /// Внешний IP и страна. Основной: ipapi.co (IP + флаг страны).
-    /// Запасной: api.ipify.org (только IP, без жёстких лимитов).
+    /// Внешний IP и страна. Цепочка запасных сервисов, чтобы не упереться в лимиты:
+    /// 1) ipapi.co — IP + страна (~1000/день)
+    /// 2) ipwho.is — IP + страна (~10 000/месяц)
+    /// 3) api.ipify.org — только IP, практически без лимитов
     private static func fetchPublicIP() async -> (ip: String, flag: String)? {
         if let url = URL(string: "https://ipapi.co/json/"),
            let (data, _) = try? await URLSession.shared.data(from: url),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let ip = json["ip"] as? String {
+            let code = (json["country_code"] as? String) ?? ""
+            return (ip, Self.flagEmoji(code))
+        }
+        if let url = URL(string: "https://ipwho.is/"),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           (json["success"] as? Bool) != false,
            let ip = json["ip"] as? String {
             let code = (json["country_code"] as? String) ?? ""
             return (ip, Self.flagEmoji(code))
