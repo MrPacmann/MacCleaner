@@ -39,6 +39,7 @@ final class MenuBarController: NSObject {
             popover = nil
             animTimer?.invalidate()
             animTimer = nil
+            monitor.stopAutoRefresh()
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
         }
@@ -58,13 +59,14 @@ final class MenuBarController: NSObject {
         animTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.animTick() }
         }
+        // Метрики — от единого таймера MonitorState (общий с окном и панелью)
+        monitor.startAutoRefresh()
     }
 
-    /// Кадр анимации: раз в 2 с обновляем метрики,
-    /// иконку рисует выбранный стиль; скорость — от загрузки CPU.
+    /// Кадр анимации: иконку рисует выбранный стиль; скорость — от загрузки CPU.
+    /// Метрики здесь больше не обновляем — за это отвечает MonitorState.startAutoRefresh().
     private func animTick() {
         animTickCount += 1
-        if animTickCount % 20 == 1 { monitor.refresh() }
         guard let button = statusItem?.button else { return }
         let t = Date().timeIntervalSince(animStart)
         button.image = iconStyle.image(t: t, cpu: monitor.cpuUsage)
@@ -130,12 +132,8 @@ struct MenuBarPanelView: View {
         }
         .padding(.vertical, 6)
         .frame(width: 292)
-        .task {
-            while !Task.isCancelled {
-                monitor.refresh()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
+        .onAppear { monitor.startAutoRefresh() }
+        .onDisappear { monitor.stopAutoRefresh() }
     }
 
     private var divider: some View {

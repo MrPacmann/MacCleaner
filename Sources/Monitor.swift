@@ -74,8 +74,10 @@ final class MonitorState {
         let caps = Scanner.volumeCapacities()
         diskFree = caps.free
         diskTotal = caps.total
-        localIP = Self.localIPv4()
-        updateNetSpeed()
+        // Сеть — за один проход по интерфейсам: IP + счётчики байт
+        let net = Self.netInfo()
+        localIP = net.ip
+        updateNetSpeed(down: net.down, up: net.up)
 
         // Корзина — раз в минуту (каждый 30-й тик по 2 секунды)
         tick += 1
@@ -87,59 +89,75 @@ final class MonitorState {
         }
     }
 
-    /// IPv4-адрес на en0 (Wi-Fi/Ethernet у ноутбуков и десктопов Apple)
-    private static func localIPv4() -> String? {
+    /// Один проход по интерфейсам: IPv4 на en0 + суммарные счётчики байт
+    /// (раньше было два отдельных обхода getifaddrs за тик)
+    private static func netInfo() -> (ip: String?, down: UInt64, up: UInt64) {
         var iflist: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&iflist) == 0, let first = iflist else { return nil }
+        guard getifaddrs(&iflist) == 0, let first = iflist else { return (nil, 0, 0) }
         defer { freeifaddrs(iflist) }
-        var result: String?
-        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
-            let name = String(cString: ptr.pointee.ifa_name)
-            let family = ptr.pointee.ifa_addr.pointee.sa_family
-            let flags = Int32(ptr.pointee.ifa_flags)
-            guard name == "en0", family == UInt8(AF_INET), (flags & IFF_UP) != 0 else { continue }
-            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            getnameinfo(ptr.pointee.ifa_addr, socklen_t(ptr.pointee.ifa_addr.pointee.sa_len),
-                        &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
-            result = String(cString: host)
-        }
-        return result
-    }
-
-    /// Суммарные счётчики байт по всем активным интерфейсам (кроме lo0)
-    private static func netCounters() -> (down: UInt64, up: UInt64) {
-        var iflist: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&iflist) == 0, let first = iflist else { return (0, 0) }
-        defer { freeifaddrs(iflist) }
+        var ip: String? = nil
         var down: UInt64 = 0
         var up: UInt64 = 0
         for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let name = String(cString: ptr.pointee.ifa_name)
             let family = ptr.pointee.ifa_addr.pointee.sa_family
             let flags = Int32(ptr.pointee.ifa_flags)
-            // Берём только канальный уровень (там лежит if_data), пропускаем loopback и погашенные
-            guard family == UInt8(AF_LINK), name != "lo0", (flags & IFF_UP) != 0,
-                  let data = ptr.pointee.ifa_data else { continue }
-            let ifd = data.assumingMemoryBound(to: if_data.self).pointee
-            down &+= UInt64(ifd.ifi_ibytes)
-            up &+= UInt64(ifd.ifi_obytes)
+            if family == UInt8(AF_LINK) {
+                // Канальный уровень — там лежит if_data со счётчиками
+                guard name != "lo0", (flags & IFF_UP) != 0,
+                      let data = ptr.pointee.ifa_data else { continue }
+                let ifd = data.assumingMemoryBound(to: if_data.self).pointee
+                down &+= UInt64(ifd.ifi_ibytes)
+                up &+= UInt64(ifd.ifi_obytes)
+            } else if family == UInt8(AF_INET), name == "en0", (flags & IFF_UP) != 0 {
+                var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(ptr.pointee.ifa_addr, socklen_t(ptr.pointee.ifa_addr.pointee.sa_len),
+                            &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+                ip = String(cString: host)
+            }
         }
-        return (down, up)
+        return (ip, down, up)
     }
 
     /// Пересчёт скорости по дельте счётчиков между тиками refresh()
-    private func updateNetSpeed() {
-        let counters = Self.netCounters()
+    private func updateNetSpeed(down: UInt64, up: UInt64) {
         let now = Date()
         if let prev = prevNet {
             let dt = now.timeIntervalSince(prev.at)
             if dt > 0 {
                 // &- переживает 32-битное переполнение счётчиков
-                netDown = UInt64(Double(counters.down &- prev.down) / dt)
-                netUp = UInt64(Double(counters.up &- prev.up) / dt)
+                netDown = UInt64(Double(down &- prev.down) / dt)
+                netUp = UInt64(Double(up &- prev.up) / dt)
             }
         }
-        prevNet = (counters.down, counters.up, now)
+        prevNet = (down, up, now)
+    }
+
+    // MARK: Единый таймер обновления
+
+    /// Один refresh()-цикл на всех подписчиков (окно мониторинга,
+    /// панель меню-бара, анимация иконки) вместо трёх параллельных таймеров.
+    private var refreshTask: Task<Void, Never>?
+    private var subscribers = 0
+
+    func startAutoRefresh() {
+        subscribers += 1
+        guard refreshTask == nil else { return }
+        refreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.refresh()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    func stopAutoRefresh() {
+        subscribers = max(0, subscribers - 1)
+        if subscribers == 0 {
+            refreshTask?.cancel()
+            refreshTask = nil
+        }
     }
 
     // MARK: Низкоуровневые замеры
@@ -289,12 +307,8 @@ struct MonitorView: View {
             }
             .padding(24)
         }
-        .task {
-            while !Task.isCancelled {
-                model.monitor.refresh()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
+        .onAppear { model.monitor.startAutoRefresh() }
+        .onDisappear { model.monitor.stopAutoRefresh() }
     }
 
     // MARK: Карточки

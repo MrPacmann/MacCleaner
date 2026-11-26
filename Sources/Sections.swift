@@ -41,7 +41,11 @@ struct OverviewView: View {
         .task {
             // При запуске — только цифры диска. Сканирование стартует
             // исключительно по кнопке, чтобы не спамить окнами разрешений.
-            if model.disk.phase == .idle { model.refreshVolumeInfo() }
+            // Результаты прошлого сканирования поднимаем из кэша мгновенно.
+            if model.disk.phase == .idle {
+                model.loadScanCache()
+                model.refreshVolumeInfo()
+            }
         }
     }
 
@@ -56,7 +60,7 @@ struct OverviewView: View {
                     Spacer()
                     ScanButton(title: L10n.shared.t(model.disk.phase == .idle ? "btn.scan" : "btn.rescan"),
                                isScanning: model.disk.phase == .scanning) {
-                        Task { await model.scanWithRecommendations(force: true) }
+                        model.startDeepScan(force: true)
                     }
                 }
 
@@ -112,6 +116,8 @@ struct OverviewView: View {
                     Spacer()
                     Text(L10n.shared.t("scan.bg"))
                         .font(.caption).foregroundStyle(.tertiary)
+                    Button(L10n.shared.t("btn.cancel")) { model.cancelDeepScan() }
+                        .controlSize(.small)
                 }
             }
             .padding(20)
@@ -387,7 +393,7 @@ struct CategoryDetailView: View {
                             .font(.callout).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(.vertical, 30)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(files) { file in
                                 SelectableRow(path: file.path, name: file.name, size: file.size,
                                               isDir: file.isDir,
@@ -431,7 +437,7 @@ struct FoldersView: View {
                     EmptyState(icon: "folder.badge.questionmark", iconColor: Theme.accent,
                                title: L10n.shared.t("empty.scanFirst.t"),
                                subtitle: L10n.shared.t("empty.scanFolders.s"),
-                               buttonTitle: L10n.shared.t("btn.scan")) { Task { await model.runDeepScan(force: true) } }
+                               buttonTitle: L10n.shared.t("btn.scan")) { model.startDeepScan(force: true) }
                 }
                 else if model.disk.topFolders.isEmpty {
                     EmptyState(icon: "checkmark", title: L10n.shared.t("empty.noFolders.t"),
@@ -450,7 +456,7 @@ struct FoldersView: View {
                             .font(.callout).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(.vertical, 30)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(folders) { folder in
                                 FolderRow(folder: folder)
                             }
@@ -534,7 +540,7 @@ struct FolderRow: View {
             }
 
             if expanded {
-                VStack(spacing: 6) {
+                LazyVStack(spacing: 6) {
                     if let children {
                         if children.isEmpty {
                             Text(L10n.shared.t("folders.empty"))
@@ -590,12 +596,12 @@ struct LargeFilesView: View {
                     EmptyState(icon: "doc.magnifyingglass", iconColor: Theme.accent,
                                title: L10n.shared.t("empty.scanFirst.t"),
                                subtitle: L10n.shared.t("empty.scanLarge.s"),
-                               buttonTitle: L10n.shared.t("btn.scan")) { Task { await model.runDeepScan(force: true) } }
+                               buttonTitle: L10n.shared.t("btn.scan")) { model.startDeepScan(force: true) }
                 }
                 else if model.disk.largeFiles.isEmpty {
                     EmptyState(icon: "checkmark", title: L10n.shared.t("empty.none.t"),
                                subtitle: L10n.shared.t("empty.noneLarge.s"),
-                               buttonTitle: L10n.shared.t("btn.rescan")) { Task { await model.runDeepScan(force: true) } }
+                               buttonTitle: L10n.shared.t("btn.rescan")) { model.startDeepScan(force: true) }
                 }
                 else {
                     HStack {
@@ -621,7 +627,7 @@ struct LargeFilesView: View {
                             .font(.callout).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(.vertical, 30)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(items) { file in
                                 SelectableRow(path: file.path, name: file.name, size: file.size,
                                               subtitle: file.path.replacingOccurrences(of: Scanner.home, with: "~"),
@@ -748,7 +754,7 @@ struct DupeGroupCard: View {
 
             if expanded {
                 Divider().padding(.horizontal, 14)
-                VStack(spacing: 6) {
+                LazyVStack(spacing: 6) {
                     ForEach(group.paths, id: \.self) { p in
                         SelectableRow(path: p,
                                       name: URL(fileURLWithPath: p).lastPathComponent,
@@ -799,7 +805,7 @@ struct AppsView: View {
                                 .font(.callout.weight(.medium)).foregroundStyle(.secondary)
                             Spacer()
                         }
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(model.appsState.apps) { app in
                                 AppRow(app: app)
                             }
@@ -878,7 +884,7 @@ struct OrphansCard: View {
 
             if expanded {
                 Divider().padding(.horizontal, 14)
-                VStack(spacing: 6) {
+                LazyVStack(spacing: 6) {
                     ForEach(model.appsState.orphans) { item in
                         SelectableRow(path: item.path, name: item.name, size: item.size,
                                       isDir: item.isDir, note: item.note)
@@ -923,7 +929,7 @@ struct UninstallSheet: View {
                     .font(.callout).foregroundStyle(.secondary)
             } else {
                 ScrollView {
-                    VStack(spacing: 6) {
+                    LazyVStack(spacing: 6) {
                         ForEach(leftovers) { item in
                             HStack(spacing: 10) {
                                 CheckBox(isOn: chosen.contains(item.path)) { on in
@@ -1058,7 +1064,7 @@ struct DownloadsView: View {
                             .font(.callout).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(.vertical, 30)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(items) { item in
                                 SelectableRow(path: item.path, name: item.name, size: item.size, date: item.mtime)
                             }
@@ -1202,7 +1208,7 @@ Text(L10n.shared.t("junk.badge")).badgeStyle(color: Color(red: 0.93, green: 0.55
             }
             .padding(14)
         case .done:
-            VStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: 8) {
                 HStack {
                     SelectionToolbar(paths: cat.items.map(\.path))
                     Text(L10n.shared.f("junk.selCount", cat.items.filter { model.selected.contains($0.path) }.count, cat.items.count))
@@ -1264,7 +1270,7 @@ struct StartupView: View {
                     EmptyState(icon: "checkmark", title: L10n.shared.t("start.empty.t"),
                                subtitle: L10n.shared.t("start.empty.s"))
                 case .done:
-                    VStack(spacing: 8) {
+                    LazyVStack(spacing: 8) {
                         ForEach(model.startup.items) { item in
                             SelectableRow(path: item.path, name: item.label, size: item.size,
                                           subtitle: item.program,
@@ -1351,7 +1357,7 @@ struct ExtensionGroupCard: View {
     let group: ExtensionGroup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        LazyVStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(L10n.shared.t(group.key)).font(.callout.weight(.semibold))
                 Text(L10n.shared.f("misc.filesCount", group.items.count, Format.bytes(group.total)))
@@ -1434,7 +1440,7 @@ struct TrashView: View {
 
                     Text(L10n.shared.t("trash.recent")).font(.headline)
 
-                    VStack(spacing: 8) {
+                    LazyVStack(spacing: 8) {
                         ForEach(model.trashCategory.items) { item in
                             SelectableRow(path: item.path, name: item.name, size: item.size,
                                           isDir: item.isDir, date: item.mtime, selectable: false)
@@ -1490,7 +1496,7 @@ struct HistoryView: View {
                         .padding(.vertical, 18)
                     }
 
-                    VStack(spacing: 8) {
+                    LazyVStack(spacing: 8) {
                         ForEach(model.history) { entry in
                             HStack(spacing: 12) {
                                 IconTile(symbol: "clock", color: Theme.accent, size: 34)

@@ -93,7 +93,7 @@ struct MapView: View {
                     EmptyState(icon: "square.split.2x2", iconColor: Theme.accent,
                                title: L10n.shared.t("empty.scanFirst.t"),
                                subtitle: L10n.shared.t("empty.scanFolders.s"),
-                               buttonTitle: L10n.shared.t("btn.scan")) { Task { await model.runDeepScan(force: true) } }
+                               buttonTitle: L10n.shared.t("btn.scan")) { model.startDeepScan(force: true) }
                 }
                 else {
                     TreemapCard(height: 480)

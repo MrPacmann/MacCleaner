@@ -541,7 +541,7 @@ final class CategoryState: Identifiable {
 
 // MARK: - Обзор диска
 
-enum FileCategory: String, CaseIterable, Identifiable {
+enum FileCategory: String, CaseIterable, Identifiable, Codable {
     case video = "Видео"
     case images = "Образы и фото"
     case archives = "Архивы и образы"
@@ -578,7 +578,7 @@ enum FileCategory: String, CaseIterable, Identifiable {
     }
 }
 
-struct LargeFile: Identifiable, Hashable {
+struct LargeFile: Identifiable, Hashable, Codable {
     let id = UUID()
     let path: String
     let name: String
@@ -586,6 +586,11 @@ struct LargeFile: Identifiable, Hashable {
     let access: Date?
     let category: FileCategory
     var isDir: Bool = false
+
+    // id не сохраняем в кэш — при загрузке генерируется новый
+    enum CodingKeys: String, CodingKey {
+        case path, name, size, access, category, isDir
+    }
 
     var accessNote: String {
         guard let access else { return "" }
@@ -1032,6 +1037,19 @@ final class CleanerViewModel {
         }
     }
 
+    /// Сканирование как отменяемая задача — кнопка «Отмена» в карточке прогресса
+    private var deepScanTask: Task<Void, Never>?
+
+    func startDeepScan(force: Bool = false) {
+        deepScanTask?.cancel()
+        deepScanTask = Task { await scanWithRecommendations(force: force) }
+    }
+
+    func cancelDeepScan() {
+        deepScanTask?.cancel()
+        deepScanTask = nil
+    }
+
     func runDeepScan(force: Bool = false) async {
         if disk.phase == .scanning { return }
         if disk.phase == .done && !force { return }
@@ -1064,9 +1082,61 @@ final class CleanerViewModel {
             index(result.dupeCandidates)
             index(result.topFolders)
             for files in result.topByCategory.values { index(files) }
+            saveScanCache(result)
+        } catch is CancellationError {
+            // Пользователь нажал «Отмена» — просто возвращаемся в исходное состояние
+            disk.phase = .idle
         } catch {
             disk.phase = .error(error.localizedDescription)
         }
+    }
+
+    // MARK: Кэш последнего сканирования
+
+    /// Результат глубокого сканирования + дата, JSON на диске.
+    /// После перезапуска приложения разделы открываются сразу со старыми данными
+    /// (с пометкой «обновлено …»), пересканирование — только по кнопке.
+    private struct ScanCache: Codable {
+        var finishedAt: Date
+        var result: DeepScanResult
+    }
+
+    private var scanCacheURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MacCleaner", isDirectory: true)
+            .appendingPathComponent("scan-cache.json")
+    }
+
+    private func saveScanCache(_ result: DeepScanResult) {
+        let cache = ScanCache(finishedAt: Date(), result: result)
+        let url = scanCacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(cache) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Поднять кэш при запуске. Только если сканирование ещё не запускали.
+    func loadScanCache() {
+        guard disk.phase == .idle,
+              let data = try? Data(contentsOf: scanCacheURL),
+              let cache = try? JSONDecoder().decode(ScanCache.self, from: data)
+        else { return }
+        let r = cache.result
+        disk.byCategory = r.byCategory
+        disk.largeFiles = r.large
+        disk.dupeCandidates = r.dupeCandidates
+        disk.topByCategory = r.topByCategory
+        disk.topFolders = r.topFolders
+        disk.topLevel = r.topLevel
+        disk.folderSizes = r.folderSizes
+        disk.finishedAt = cache.finishedAt
+        disk.phase = .done
+        index(r.large)
+        index(r.dupeCandidates)
+        index(r.topFolders)
+        for files in r.topByCategory.values { index(files) }
     }
 
     // MARK: Дубликаты

@@ -8,7 +8,7 @@ struct ScanResult {
     var denied: Bool
 }
 
-struct DeepScanResult {
+struct DeepScanResult: Codable {
     var byCategory: [FileCategory: UInt64]
     var large: [LargeFile]
     var dupeCandidates: [LargeFile]
@@ -79,12 +79,15 @@ enum Scanner {
     /// Бэкапы iPhone/iPad: ~/Library/Application Support/MobileSync/Backup/*
     static func scanMobileBackups() async -> [CleanItem] {
         let root = home + "/Library/Application Support/MobileSync/Backup"
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
+        let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: root), includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]) else { return [] }
         var items: [CleanItem] = []
-        for name in entries where !name.hasPrefix(".") {
-            let p = (root as NSString).appendingPathComponent(name)
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue else { continue }
+        for url in urls {
+            guard let vals = try? url.resourceValues(forKeys: Set(keys)),
+                  vals.isDirectory == true else { continue }
+            let p = url.path
             let size = await duSize(p)
             if size < 64 * 1024 { continue }
             // Имя устройства и дата — из Info.plist внутри бэкапа
@@ -94,12 +97,9 @@ enum Scanner {
                 device = plist["Device Name"] as? String
                 mtime = plist["Last Backup Date"] as? Date
             }
-            if mtime == nil {
-                let attrs = try? FileManager.default.attributesOfItem(atPath: p)
-                mtime = attrs?[.modificationDate] as? Date
-            }
+            if mtime == nil { mtime = vals.contentModificationDate }
             items.append(CleanItem(path: p,
-                                   name: device ?? "Бэкап \(name.prefix(8))…",
+                                   name: device ?? "Бэкап \(url.lastPathComponent.prefix(8))…",
                                    size: size, mtime: mtime, isDir: true,
                                    note: L10n.shared.t("backups.note")))
         }
@@ -107,17 +107,20 @@ enum Scanner {
     }
 
     static func scanChildren(of root: String, note: String?, minSize: UInt64 = 64 * 1024) async -> [CleanItem] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
-        let items = await mapLimit(entries, 8) { name -> CleanItem? in
-            let p = (root as NSString).appendingPathComponent(name)
-            let size = await duSize(p)
+        // Тип и дата прилетают одной пачкой вместе с листингом — без лишних stat на файл
+        let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey,
+                                      .fileSizeKey, .totalFileAllocatedSizeKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: root), includingPropertiesForKeys: keys) else { return [] }
+        let items = await mapLimit(urls, 8) { url -> CleanItem? in
+            guard let vals = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            let isDir = vals.isDirectory ?? false
+            let size = isDir
+                ? await duSize(url.path)
+                : UInt64(vals.totalFileAllocatedSize ?? vals.fileSize ?? 0)
             if size < minSize { return nil }
-            var isDir: ObjCBool = false
-            FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
-            let attrs = try? FileManager.default.attributesOfItem(atPath: p)
-            return CleanItem(path: p, name: name, size: size,
-                             mtime: attrs?[.modificationDate] as? Date,
-                             isDir: isDir.boolValue, note: note)
+            return CleanItem(path: url.path, name: url.lastPathComponent, size: size,
+                             mtime: vals.contentModificationDate, isDir: isDir, note: note)
         }
         return items.sorted { $0.size > $1.size }
     }
@@ -240,12 +243,14 @@ enum Scanner {
         if FileManager.default.fileExists(atPath: container) {
             // Главный кандидат — сырой диск VM, остальное по мелочи
             let vms = container + "/vms"
-            if let entries = try? FileManager.default.contentsOfDirectory(atPath: vms) {
-                for e in entries where !e.hasPrefix(".") {
-                    let p = vms + "/" + e
-                    let size = await duSize(p)
+            if let urls = try? FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: vms), includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]) {
+                for url in urls {
+                    let size = await duSize(url.path)
                     if size >= 64 * 1024 {
-                        items.append(CleanItem(path: p, name: "Виртуальный диск Docker (\(e))",
+                        items.append(CleanItem(path: url.path,
+                                               name: "Виртуальный диск Docker (\(url.lastPathComponent))",
                                                size: size, mtime: nil, isDir: true,
                                                note: "Образы и кэши — перекачаются. Закрой Docker перед удалением"))
                     }
@@ -423,16 +428,17 @@ enum Scanner {
         for g in extensionDirs {
             var items: [CleanItem] = []
             for dir in g.dirs.map({ $0.replacingOccurrences(of: "~", with: home) }) {
-                guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-                for entry in entries where !entry.hasPrefix(".") {
-                    let p = dir + "/" + entry
-                    let size = await duSize(p)
-                    var isDir: ObjCBool = false
-                    FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
-                    let attrs = try? FileManager.default.attributesOfItem(atPath: p)
-                    items.append(CleanItem(path: p, name: entry, size: size,
-                                           mtime: attrs?[.modificationDate] as? Date,
-                                           isDir: isDir.boolValue, note: nil))
+                let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]
+                guard let urls = try? FileManager.default.contentsOfDirectory(
+                    at: URL(fileURLWithPath: dir), includingPropertiesForKeys: keys,
+                    options: [.skipsHiddenFiles]) else { continue }
+                for url in urls {
+                    let vals = try? url.resourceValues(forKeys: Set(keys))
+                    let isDir = vals?.isDirectory ?? false
+                    let size = await duSize(url.path)
+                    items.append(CleanItem(path: url.path, name: url.lastPathComponent, size: size,
+                                           mtime: vals?.contentModificationDate,
+                                           isDir: isDir, note: nil))
                 }
             }
             items.sort { $0.size > $1.size }
@@ -525,7 +531,7 @@ enum Scanner {
     }
 
     static func deepScan(progress: @Sendable @escaping (Int, String) -> Void) async throws -> DeepScanResult {
-        await Task.detached(priority: .userInitiated) {
+        try await Task.detached(priority: .userInitiated) {
             var byCategory: [FileCategory: UInt64] = [:]
             var large: [LargeFile] = []
             var dupeCandidates: [LargeFile] = []
@@ -561,6 +567,7 @@ enum Scanner {
             }
 
             while let url = enumerator.nextObject() as? URL {
+                if Task.isCancelled { throw CancellationError() }
                 let path = url.path
                 // Не лезем в Корзину
                 if path.hasPrefix(trashDir) { enumerator.skipDescendants(); continue }
@@ -572,7 +579,7 @@ enum Scanner {
                     let name = url.lastPathComponent
                     // .app считаем целиком как «Приложения», внутрь не заходим
                     if name.hasSuffix(".app") {
-                        let size = await duSize(path)
+                        let size = duSizeSync(path)
                         byCategory[.apps, default: 0] += size
                         topByCategory[.apps, default: []].append(
                             LargeFile(path: path, name: name, size: size, access: nil, category: .apps, isDir: true))
@@ -582,7 +589,7 @@ enum Scanner {
                     }
                     // Тяжёлые дев-папки считаем целиком
                     if name == "node_modules" || name == "DerivedData" {
-                        let size = await duSize(path)
+                        let size = duSizeSync(path)
                         byCategory[.dev, default: 0] += size
                         topByCategory[.dev, default: []].append(
                             LargeFile(path: path, name: name, size: size, access: nil, category: .dev, isDir: true))
@@ -691,6 +698,7 @@ enum Scanner {
         var byQuick: [String: [LargeFile]] = [:]
         for group in sizeGroups {
             for f in group {
+                if Task.isCancelled { return [] }
                 if let h = quickHash(f.path, size: f.size) {
                     byQuick[h, default: []].append(f)
                 }
@@ -699,8 +707,10 @@ enum Scanner {
         // 3. Полный хэш только у совпавших
         var result: [DupeGroup] = []
         for (_, group) in byQuick where group.count > 1 {
+            if Task.isCancelled { return [] }
             var byFull: [String: [String]] = [:]
             for f in group {
+                if Task.isCancelled { return [] }
                 if let h = fullHash(f.path) {
                     byFull[h, default: []].append(f.path)
                 }
@@ -718,9 +728,10 @@ enum Scanner {
         let dirs = ["/Applications", home + "/Applications"]
         var found: [URL] = []
         for dir in dirs {
-            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for name in entries where name.hasSuffix(".app") {
-                found.append(URL(fileURLWithPath: dir + "/" + name))
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: dir), includingPropertiesForKeys: nil) else { continue }
+            for url in urls where url.pathExtension == "app" {
+                found.append(url)
             }
         }
         let apps = await mapLimit(found, 6) { url -> AppEntry? in
@@ -756,17 +767,18 @@ enum Scanner {
         var items: [CleanItem] = []
         for rel in appDataDirs {
             let dir = home + "/" + rel
-            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for entry in entries {
-                let low = entry.lowercased()
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: dir), includingPropertiesForKeys: [.isDirectoryKey])
+            else { continue }
+            for url in urls {
+                let low = url.lastPathComponent.lowercased()
                 if low.hasPrefix("com.apple.") { continue }
                 if tokens.contains(where: { low.contains($0) }) {
-                    let p = dir + "/" + entry
-                    let size = await duSize(p)
-                    var isDir: ObjCBool = false
-                    FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
-                    items.append(CleanItem(path: p, name: rel.replacingOccurrences(of: "Library/", with: "") + "/" + entry,
-                                           size: size, mtime: nil, isDir: isDir.boolValue, note: nil))
+                    let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                    let size = await duSize(url.path)
+                    items.append(CleanItem(path: url.path,
+                                           name: rel.replacingOccurrences(of: "Library/", with: "") + "/" + url.lastPathComponent,
+                                           size: size, mtime: nil, isDir: isDir, note: nil))
                 }
             }
         }
@@ -819,9 +831,11 @@ enum Scanner {
                     "Library/Saved Application State", "Library/HTTPStorages", "Library/Logs"]
         for rel in dirs {
             let dir = home + "/" + rel
-            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for entry in entries {
-                let low = entry.lowercased()
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: dir), includingPropertiesForKeys: [.isDirectoryKey])
+            else { continue }
+            for url in urls {
+                let low = url.lastPathComponent.lowercased()
                 if low.hasPrefix("com.apple") || low.hasPrefix("apple") { continue }
                 if allowlist.contains(where: { low.hasPrefix($0) }) { continue }
                 let base = low
@@ -834,14 +848,13 @@ enum Scanner {
                     !token.isEmpty && (base.contains(token) || (base.count >= 5 && token.contains(base)))
                 })
                 if !hasApp {
-                    let p = dir + "/" + entry
+                    let p = url.path
                     let size = await duSize(p)
                     if size < 256 * 1024 { continue }
-                    var isDir: ObjCBool = false
-                    FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
+                    let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
                     orphans.append(CleanItem(path: p,
-                                             name: rel.replacingOccurrences(of: "Library/", with: "") + "/" + entry,
-                                             size: size, mtime: nil, isDir: isDir.boolValue,
+                                             name: rel.replacingOccurrences(of: "Library/", with: "") + "/" + url.lastPathComponent,
+                                             size: size, mtime: nil, isDir: isDir,
                                              note: "приложение не найдено"))
                 }
             }
@@ -881,12 +894,41 @@ enum Scanner {
 
     // MARK: - Процессы и утилиты
 
+    /// Физический размер файла/папки своим обходом — без запуска внешнего du.
+    /// Симлинки не разыменовываются; считаем allocated size (реально занятое на диске).
     static func duSize(_ path: String) async -> UInt64 {
-        guard let out = await runProc("/usr/bin/du", ["-sk", path]),
-              let first = out.split(separator: "\t").first,
-              let kb = UInt64(first.trimmingCharacters(in: .whitespaces))
-        else { return 0 }
-        return kb * 1024
+        await Task.detached(priority: .userInitiated) { Self.duSizeSync(path) }.value
+    }
+
+    /// Синхронная версия — звать из уже фонового контекста (deepScan и т.п.)
+    static func duSizeSync(_ path: String) -> UInt64 {
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .fileSizeKey,
+                                      .isDirectoryKey, .isSymbolicLinkKey]
+        let url = URL(fileURLWithPath: path)
+        guard let vals = try? url.resourceValues(forKeys: Set(keys)) else { return 0 }
+        func sizeOf(_ v: URLResourceValues) -> UInt64 {
+            UInt64(v.totalFileAllocatedSize ?? v.fileSize ?? 0)
+        }
+        // Файл или симлинк — размер самого элемента
+        guard (vals.isDirectory ?? false) && !(vals.isSymbolicLink ?? false) else {
+            return sizeOf(vals)
+        }
+        guard let en = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys,
+                                                      options: [],
+                                                      errorHandler: { _, _ in true }) else {
+            return sizeOf(vals)
+        }
+        var total: UInt64 = sizeOf(vals)  // сама папка (du тоже её считает)
+        var n = 0
+        for case let u as URL in en {
+            // Даём возможность отменить длинный обход
+            n += 1
+            if n % 256 == 0 && Task.isCancelled { break }
+            guard let v = try? u.resourceValues(forKeys: Set(keys)) else { continue }
+            if (v.isDirectory ?? false), (v.isSymbolicLink ?? false) { continue }
+            total &+= sizeOf(v)
+        }
+        return total
     }
 
     static func runProc(_ path: String, _ args: [String]) async -> String? {
