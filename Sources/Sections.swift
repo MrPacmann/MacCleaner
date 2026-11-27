@@ -33,6 +33,7 @@ struct OverviewView: View {
                         if model.disk.phase == .scanning { scanningCard }
                         if model.disk.phase == .done { detailsCard }
                         if model.disk.phase == .done { nextSteps }
+                        if !model.history.isEmpty { freedCard }
                     }
                     .padding(24)
                 }
@@ -201,6 +202,45 @@ struct OverviewView: View {
 
     var hints: [Hint] {
         var list: [Hint] = []
+        // Место кончается — самый важный сигнал, всегда первый
+        if model.disk.volumeTotal > 0,
+           Double(model.disk.volumeFree) / Double(model.disk.volumeTotal) < 0.1 {
+            list.append(Hint(id: "lowdisk", icon: "exclamationmark.triangle.fill",
+                             color: Theme.danger,
+                             title: L10n.shared.t("hint.lowdisk.t"),
+                             text: L10n.shared.f("hint.lowdisk.s", Format.bytes(model.disk.volumeFree)),
+                             section: .map, bytes: model.disk.volumeTotal))
+        }
+        // Кэши разработчика: категория «Разработка» набрала больше гигабайта
+        let devSize = model.disk.byCategory[.dev] ?? 0
+        if devSize > 1024 * 1024 * 1024 {
+            list.append(Hint(id: "dev", icon: "hammer",
+                             color: Color(red: 0.86, green: 0.89, blue: 0.45),
+                             title: L10n.shared.t("hint.dev.t"),
+                             text: L10n.shared.f("hint.dev.s", Format.bytes(devSize)),
+                             section: .junk, bytes: devSize))
+        }
+        // Давно не используемые приложения (если раздел уже сканировался)
+        if model.appsState.status == .done {
+            let stale = model.appsState.apps.filter { $0.isStale }
+            if !stale.isEmpty {
+                let staleSize = stale.reduce(0) { $0 + $1.size }
+                list.append(Hint(id: "stale", icon: "square.grid.2x2",
+                                 color: Color(red: 0.42, green: 0.84, blue: 0.72),
+                                 title: L10n.shared.t("sec.apps"),
+                                 text: L10n.shared.f("hint.stale.s", stale.count),
+                                 section: .apps, bytes: staleSize))
+            }
+            // Остатки удалённых приложений
+            let orphSize = model.appsState.orphans.reduce(0) { $0 + $1.size }
+            if model.appsState.orphansScanned && orphSize > 0 {
+                list.append(Hint(id: "orphans", icon: "app.badge.checkmark",
+                                 color: Color(red: 0.93, green: 0.70, blue: 0.40),
+                                 title: L10n.shared.t("orph.title"),
+                                 text: L10n.shared.f("hint.orph.s", Format.bytes(orphSize)),
+                                 section: .apps, bytes: orphSize))
+            }
+        }
         let lfSize = model.disk.largeFiles.reduce(0) { $0 + $1.size }
         if !model.disk.largeFiles.isEmpty {
             list.append(Hint(id: "large", icon: "doc",
@@ -256,6 +296,52 @@ struct OverviewView: View {
                              section: .junk, bytes: 0))
         }
         return Array(list.prefix(3))
+    }
+
+    // «Освобождено всего» — счётчик и недельный график очисток
+    var freedCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Format.bytes(model.totalFreed))
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(Theme.accent)
+                        Text(L10n.shared.t("hist.freed"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(model.history.count)")
+                            .font(.system(size: 28, weight: .bold))
+                        Text(L10n.shared.f("ov.runs", model.history.count))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Chart(model.weeklyFreed, id: \.week) { w in
+                    BarMark(x: .value("week", w.week, unit: .weekOfYear),
+                            y: .value("gb", Double(w.bytes) / 1_000_000_000))
+                        .foregroundStyle(Theme.accentGradient)
+                        .cornerRadius(4)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let gb = value.as(Double.self), gb > 0 {
+                                Text(Format.bytes(UInt64(gb * 1_000_000_000)))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 90)
+                Text(L10n.shared.t("ov.byWeeks"))
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .padding(20)
+        }
     }
 
     var nextSteps: some View {

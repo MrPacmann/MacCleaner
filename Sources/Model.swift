@@ -153,7 +153,7 @@ final class L10n {
         "junk.selCount": "выбрано %d из %d",
         "junk.caches.t": "Кэши приложений", "junk.caches.s": "~/Library/Caches — приложения создадут заново",
         "junk.logs.t": "Логи", "junk.logs.s": "Журналы из ~/Library/Logs",
-        "junk.xcode.t": "Xcode и симуляторы", "junk.xcode.s": "DerivedData и кэши — пересоздаются при сборке",
+        "junk.xcode.t": "Xcode и симуляторы", "junk.xcode.s": "DerivedData, симуляторы, DeviceSupport — пересоздаются Xcode",
         "junk.pkgman.t": "Кэши пакетных менеджеров", "junk.pkgman.s": "npm, pip, bun, yarn, Homebrew, Gradle",
         "junk.node_modules.t": "node_modules в проектах", "junk.node_modules.s": "Восстанавливаются командой npm install",
         "junk.mobilesync.t": "Бэкапы iPhone и iPad", "junk.mobilesync.s": "Старые бэкапы устройств из MobileSync — проверь, какие ещё нужны",
@@ -262,6 +262,13 @@ final class L10n {
         "mb.pubip": "Внешний IP: %@ %@",
         "mon.ram": "%@ ОЗУ",
         "mb.offline": "Нет соединения",
+        "ov.runs": "%d очисток", "ov.byWeeks": "по неделям",
+        "hint.dev.t": "Кэши разработчика",
+        "hint.dev.s": "DerivedData, симуляторы, пакеты — %@",
+        "hint.stale.s": "%d не открывались полгода и дольше",
+        "hint.orph.s": "Остатки удалённых приложений · %@",
+        "hint.lowdisk.t": "Место кончается",
+        "hint.lowdisk.s": "Свободно всего %@ — пора навести порядок",
     ]
 
     static let en: [String: String] = [
@@ -394,7 +401,7 @@ final class L10n {
         "junk.selCount": "%d of %d selected",
         "junk.caches.t": "App Caches", "junk.caches.s": "~/Library/Caches — apps recreate them",
         "junk.logs.t": "Logs", "junk.logs.s": "Logs from ~/Library/Logs",
-        "junk.xcode.t": "Xcode & Simulators", "junk.xcode.s": "DerivedData and caches — recreated on build",
+        "junk.xcode.t": "Xcode & Simulators", "junk.xcode.s": "DerivedData, simulators, DeviceSupport — recreated by Xcode",
         "junk.pkgman.t": "Package manager caches", "junk.pkgman.s": "npm, pip, bun, yarn, Homebrew, Gradle",
         "junk.node_modules.t": "node_modules in projects", "junk.node_modules.s": "Restored with npm install",
         "junk.mobilesync.t": "iPhone & iPad backups", "junk.mobilesync.s": "Old device backups from MobileSync — check which you still need",
@@ -503,6 +510,13 @@ final class L10n {
         "mb.pubip": "Public IP: %@ %@",
         "mon.ram": "%@ RAM",
         "mb.offline": "Offline",
+        "ov.runs": "%d cleanups", "ov.byWeeks": "by week",
+        "hint.dev.t": "Developer caches",
+        "hint.dev.s": "DerivedData, simulators, packages — %@",
+        "hint.stale.s": "%d unused for 6+ months",
+        "hint.orph.s": "Leftovers of removed apps · %@",
+        "hint.lowdisk.t": "Running out of space",
+        "hint.lowdisk.s": "Only %@ free — time to clean up",
     ]
 }
 
@@ -642,6 +656,8 @@ final class DiskScanState {
     var volumeTotal: UInt64 = 0
     var volumeFree: UInt64 = 0
     var finishedAt: Date?
+    /// Мета папок верхнего уровня — основа инкрементального пересканирования
+    var folderMeta: [String: FolderMeta]? = nil
 
     var usedByKnown: UInt64 { byCategory.values.reduce(0, +) }
 }
@@ -1118,13 +1134,22 @@ final class CleanerViewModel {
         let caps = Scanner.volumeCapacities()
         disk.volumeTotal = caps.total
         disk.volumeFree = caps.free
+        // Инкрементальное пересканирование: если есть свежая мета папок
+        // от прошлого сканирования (младше недели) — обходим только изменившиеся
+        var metaForScan: [String: FolderMeta]? = nil
+        if let meta = disk.folderMeta, !meta.isEmpty,
+           let finished = disk.finishedAt,
+           Date().timeIntervalSince(finished) < 7 * 24 * 3600 {
+            metaForScan = meta
+        }
         do {
-            let result = try await Scanner.deepScan(cancel: cancel) { [weak self] count, path in
+            let result = try await Scanner.deepScan(cacheMeta: metaForScan,
+                                                    progress: { [weak self] count, path in
                 Task { @MainActor in
                     self?.disk.filesScanned = count
                     self?.disk.currentPath = path
                 }
-            }
+            }, cancel: cancel)
             disk.byCategory = result.byCategory
             disk.largeFiles = result.large
             disk.dupeCandidates = result.dupeCandidates
@@ -1134,6 +1159,7 @@ final class CleanerViewModel {
             disk.folderSizes = result.folderSizes
             disk.finishedAt = Date()
             disk.phase = .done
+            disk.folderMeta = result.folderMeta
             appendSnapshot()
             index(result.large)
             index(result.dupeCandidates)
@@ -1190,6 +1216,7 @@ final class CleanerViewModel {
         disk.folderSizes = r.folderSizes
         disk.finishedAt = cache.finishedAt
         disk.phase = .done
+        disk.folderMeta = r.folderMeta
         index(r.large)
         index(r.dupeCandidates)
         index(r.topFolders)
@@ -1325,6 +1352,27 @@ final class CleanerViewModel {
         let ok = await Scanner.emptyTrashViaFinder()
         showToast(L10n.shared.t(ok ? "toast.trashEmptied" : "toast.trashFail"))
         await scanJunk(trashCategory)
+    }
+
+    // MARK: Статистика очисток
+
+    /// Освобождено за всё время (сумма по истории)
+    var totalFreed: UInt64 { history.reduce(0) { $0 + $1.bytes } }
+
+    /// Освобождено по неделям, последние 8 недель (для графика в Обзоре)
+    var weeklyFreed: [(week: Date, bytes: UInt64)] {
+        let cal = Calendar.current
+        guard let thisWeek = cal.dateInterval(of: .weekOfYear, for: Date())?.start else { return [] }
+        var buckets: [Date: UInt64] = [:]
+        for entry in history {
+            if let ws = cal.dateInterval(of: .weekOfYear, for: entry.date)?.start {
+                buckets[ws, default: 0] &+= entry.bytes
+            }
+        }
+        return (0..<8).reversed().compactMap { i in
+            guard let w = cal.date(byAdding: .weekOfYear, value: -i, to: thisWeek) else { return nil }
+            return (week: w, bytes: buckets[w] ?? 0)
+        }
     }
 
     // MARK: История

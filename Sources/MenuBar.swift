@@ -55,12 +55,31 @@ final class MenuBarController: NSObject {
         }
         statusItem = item
         animStart = Date()
-        animTimer?.invalidate()
-        animTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.animTick() }
-        }
+        scheduleAnim()
         // Метрики — от единого таймера MonitorState (общий с окном и панелью)
         monitor.startAutoRefresh()
+    }
+
+    /// Адаптивный таймер анимации: вместо постоянных 10 кадров/сек
+    /// подстраиваем частоту под загрузку CPU. На простое — кадр раз в 0,8 с,
+    /// что в 8 раз меньше пробуждений процессора и заметно добрее к батарее.
+    private func scheduleAnim() {
+        animTimer?.invalidate()
+        let cpu = monitor.cpuUsage
+        let interval: TimeInterval
+        if popover?.isShown == true || cpu > 0.25 {
+            interval = 0.1    // открыта панель или реальная нагрузка — плавная анимация
+        } else if cpu > 0.08 {
+            interval = 0.25
+        } else {
+            interval = 0.8    // простой — редкие кадры
+        }
+        animTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.animTick()
+                self?.scheduleAnim()
+            }
+        }
     }
 
     /// Кадр анимации: иконку рисует выбранный стиль; скорость — от загрузки CPU.
@@ -87,6 +106,7 @@ final class MenuBarController: NSObject {
         // При открытии — свежие метрики и внешний IP сразу, без ожидания тика
         monitor.refresh()
         monitor.refreshPublicIPNow()
+        scheduleAnim()   // панель открыта — ускоряем анимацию до 10 кадров/сек
         // Автоскрытие через autoCloseAfter секунд
         closeTimer?.invalidate()
         closeTimer = Timer.scheduledTimer(withTimeInterval: autoCloseAfter, repeats: false) { [weak self] _ in
@@ -98,6 +118,7 @@ final class MenuBarController: NSObject {
         closeTimer?.invalidate()
         closeTimer = nil
         popover?.performClose(nil)
+        scheduleAnim()   // панель закрыта — возвращаемся к экономному темпу
     }
 
     func openApp() {

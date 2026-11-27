@@ -8,6 +8,20 @@ struct ScanResult {
     var denied: Bool
 }
 
+/// Мета папки верхнего уровня для инкрементального сканирования:
+/// если mtime папки не изменился — переиспользуем сохранённые результаты
+/// вместо повторного обхода всего поддерева.
+struct FolderMeta: Codable {
+    /// mtime папки в секундах (Double: JSON не хранит доли секунд Date)
+    var mtime: TimeInterval
+    var size: UInt64
+    var byCategory: [FileCategory: UInt64]
+    /// Файлы ≥ 2 МБ (детализация категорий, дубликаты, большие файлы)
+    var large: [LargeFile]
+    /// Вклад в карту диска (ключи глубины 2–3 от домашней)
+    var folderSizes: [String: UInt64]
+}
+
 struct DeepScanResult: Codable {
     var byCategory: [FileCategory: UInt64]
     var large: [LargeFile]
@@ -19,6 +33,9 @@ struct DeepScanResult: Codable {
     var topLevel: [String: UInt64]
     /// Размеры папок глубиной 2–3 (детализация карты диска)
     var folderSizes: [String: UInt64]
+    /// Мета папок верхнего уровня для инкрементального пересканирования.
+    /// Опционально: у кэша от старых версий приложения этого ключа нет.
+    var folderMeta: [String: FolderMeta]? = nil
 }
 
 enum ScanError: LocalizedError {
@@ -50,11 +67,25 @@ enum Scanner {
         case "logs":
             return ScanResult(items: await scanChildren(of: home + "/Library/Logs", note: nil), denied: false)
         case "xcode":
-            let dd = await scanChildren(of: home + "/Library/Developer/Xcode/DerivedData",
-                                        note: "DerivedData — пересоздаётся при сборке")
-            let sim = await scanChildren(of: home + "/Library/Developer/CoreSimulator/Caches",
-                                         note: "Кэш симулятора")
-            return ScanResult(items: (dd + sim).sorted { $0.size > $1.size }, denied: false)
+            // Полный набор тяжёлых мест разработчика: DerivedData, кэши и сами
+            // симуляторы, символы подключённых устройств — всё пересоздаётся Xcode
+            let dirs: [(String, String)] = [
+                (home + "/Library/Developer/Xcode/DerivedData",
+                 "DerivedData — пересоздаётся при сборке"),
+                (home + "/Library/Developer/CoreSimulator/Caches",
+                 "Кэш симулятора"),
+                (home + "/Library/Developer/CoreSimulator/Devices",
+                 "Симуляторы — пересоздаются в Xcode → Devices and Simulators"),
+                (home + "/Library/Developer/Xcode/iOS DeviceSupport",
+                 "Символы устройств — перекачаются при подключении"),
+                (home + "/Library/Developer/Xcode/watchOS DeviceSupport",
+                 "Символы устройств — перекачаются при подключении"),
+            ]
+            var all: [CleanItem] = []
+            for (path, note) in dirs {
+                all += await scanChildren(of: path, note: note)
+            }
+            return ScanResult(items: all.sorted { $0.size > $1.size }, denied: false)
         case "pkgman":
             return ScanResult(items: await scanPackageCaches(), denied: false)
         case "node_modules":
@@ -144,6 +175,10 @@ enum Scanner {
             (home + "/.yarn/cache", "yarn cache", nil),
             (home + "/.gradle/caches", "Gradle caches", "Перекачается при сборке"),
             (home + "/.cocoapods", "CocoaPods cache", "Перекачается при pod install"),
+            (home + "/.m2/repository", "Maven repository", "Перекачается при сборке"),
+            (home + "/Library/Caches/org.swift.swiftpm", "SwiftPM cache", "Перекачается при сборке"),
+            (home + "/.cargo/registry", "Cargo registry", "Перекачается при сборке"),
+            (home + "/go/pkg/mod", "Go modules", "Перекачается при сборке"),
         ]
         var items: [CleanItem] = []
         for (path, name, note) in candidates {
@@ -181,17 +216,28 @@ enum Scanner {
         return items.sorted { $0.size > $1.size }
     }
 
-    /// Вложения, которые Apple Mail сохранил при открытии (~/Library/Containers/com.apple.mail/.../Mail Downloads).
-    /// Безопасно: это копии, оригиналы остаются в письмах и перекачаются при открытии.
+    /// Вложения, которые Apple Mail сохранил при открытии (~/Library/Containers/com.apple.mail/.../Mail Downloads),
+    /// плюс кэши самой Почты. Безопасно: это копии, оригиналы остаются в письмах и перекачаются.
     static func scanMailAttachments() async -> ScanResult {
-        let dir = home + "/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
-        guard FileManager.default.fileExists(atPath: dir) else {
-            return ScanResult(items: [], denied: false)
+        let dirs = [
+            home + "/Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+            home + "/Library/Containers/com.apple.mail/Data/Library/Caches",
+        ]
+        var anyExists = false
+        var denied = false
+        var items: [CleanItem] = []
+        for dir in dirs {
+            guard FileManager.default.fileExists(atPath: dir) else { continue }
+            anyExists = true
+            guard (try? FileManager.default.contentsOfDirectory(atPath: dir)) != nil else {
+                denied = true
+                continue
+            }
+            items += await scanChildren(of: dir, note: nil)
         }
-        guard (try? FileManager.default.contentsOfDirectory(atPath: dir)) != nil else {
-            return ScanResult(items: [], denied: true)
-        }
-        return ScanResult(items: await scanChildren(of: dir, note: nil), denied: false)
+        if !anyExists { return ScanResult(items: [], denied: false) }
+        return ScanResult(items: items.sorted { $0.size > $1.size },
+                          denied: denied && items.isEmpty)
     }
 
     /// Проектный мусор: dist, .next, target, build, Pods, venv/.venv.
@@ -539,98 +585,147 @@ enum Scanner {
         return .other
     }
 
-    static func deepScan(progress: @Sendable @escaping (Int, String) -> Void,
+    /// Глубокое сканирование домашней папки.
+    /// cacheMeta — мета папок верхнего уровня от прошлого сканирования:
+    /// папки с неизменным mtime не обходятся, их результаты берутся из кэша.
+    static func deepScan(cacheMeta: [String: FolderMeta]? = nil,
+                         progress: @Sendable @escaping (Int, String) -> Void,
                          cancel: CancelFlag? = nil) async throws -> DeepScanResult {
         try await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            let keys: [URLResourceKey] = [.fileSizeKey, .totalFileAllocatedSizeKey,
+                                          .contentAccessDateKey, .isDirectoryKey,
+                                          .contentModificationDateKey]
             var byCategory: [FileCategory: UInt64] = [:]
             var large: [LargeFile] = []
             var dupeCandidates: [LargeFile] = []
             var topByCategory: [FileCategory: [LargeFile]] = [:]
             var folderSizes: [String: UInt64] = [:]
             var topLevelSizes: [String: UInt64] = [:]
+            var newMeta: [String: FolderMeta] = [:]
             var scanned = 0
 
-            /// Добавляет размер всем папкам-предкам глубиной 1–3 от домашней
-            func addToAncestors(_ path: String, _ size: UInt64) {
-                guard path.hasPrefix(home + "/") else { return }
-                let rel = String(path.dropFirst(home.count + 1))
-                let comps = rel.split(separator: "/", omittingEmptySubsequences: true)
-                if let first = comps.first {
-                    topLevelSizes[home + "/" + first, default: 0] += size
-                }
-                for depth in 2...3 where comps.count >= depth {
-                    let key = home + "/" + comps.prefix(depth).joined(separator: "/")
-                    folderSizes[key, default: 0] += size
+            /// Разбирает результаты одной папки верхнего уровня (свежие или из кэша)
+            func merge(_ path: String, _ meta: FolderMeta) {
+                topLevelSizes[path] = meta.size
+                for (cat, v) in meta.byCategory { byCategory[cat, default: 0] &+= v }
+                for (k, v) in meta.folderSizes { folderSizes[k, default: 0] &+= v }
+                for f in meta.large {
+                    // Папки (.app, node_modules) — только в детализацию категории,
+                    // в дубликаты/большие файлы не идут (хэшировать папку нельзя)
+                    topByCategory[f.category, default: []].append(f)
+                    if !f.isDir && f.size >= 30 * 1024 * 1024 {
+                        dupeCandidates.append(f)
+                        if f.size >= 50 * 1024 * 1024 { large.append(f) }
+                    }
                 }
             }
 
-            let fm = FileManager.default
-            // totalFileAllocatedSize — физически занятое место: «облачные» файлы-заглушки
-            // (iCloud Photos, CloudStorage) имеют большой логический размер, но ноль на диске.
-            let keys: [URLResourceKey] = [.fileSizeKey, .totalFileAllocatedSizeKey, .contentAccessDateKey, .isDirectoryKey, .isPackageKey]
-            guard let enumerator = fm.enumerator(at: URL(fileURLWithPath: home),
-                                                 includingPropertiesForKeys: keys,
-                                                 options: [],
-                                                 errorHandler: { _, _ in true }) else {
-                return DeepScanResult(byCategory: [:], large: [], dupeCandidates: [], topByCategory: [:],
-                                      topFolders: [], topLevel: [:], folderSizes: [:])
+            /// Полный обход одного поддерева. Та же логика, что была у общего обхода:
+            /// .app, node_modules и DerivedData считаются целиком, внутрь не заходим.
+            func scanSubtree(root: URL, rootPath: String, mtime: TimeInterval) throws -> FolderMeta {
+                var meta = FolderMeta(mtime: mtime, size: 0, byCategory: [:],
+                                      large: [], folderSizes: [:])
+                guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
+                                             options: [], errorHandler: { _, _ in true }) else {
+                    return meta
+                }
+                for case let url as URL in en {
+                    if Task.isCancelled || cancel?.cancelled == true { throw CancellationError() }
+                    let path = url.path
+                    let vals = try? url.resourceValues(forKeys: Set(keys))
+                    if vals?.isDirectory == true {
+                        let name = url.lastPathComponent
+                        if name.hasSuffix(".app") || name == "node_modules" || name == "DerivedData" {
+                            let cat: FileCategory = name.hasSuffix(".app") ? .apps : .dev
+                            let size = duSizeSync(path, cancel: cancel)
+                            meta.size &+= size
+                            meta.byCategory[cat, default: 0] &+= size
+                            meta.large.append(LargeFile(path: path, name: name, size: size,
+                                                        access: nil, category: cat, isDir: true))
+                            // Вклад папки в карту диска (глубины 2–3)
+                            let rel = String(path.dropFirst(home.count + 1))
+                            let comps = rel.split(separator: "/", omittingEmptySubsequences: true)
+                            for depth in 2...3 where comps.count >= depth {
+                                let key = home + "/" + comps.prefix(depth).joined(separator: "/")
+                                meta.folderSizes[key, default: 0] &+= size
+                            }
+                            en.skipDescendants()
+                        }
+                        continue
+                    }
+                    let size = UInt64(vals?.totalFileAllocatedSize ?? vals?.fileSize ?? 0)
+                    let cat = classify(path: path, ext: url.pathExtension.lowercased())
+                    meta.size &+= size
+                    meta.byCategory[cat, default: 0] &+= size
+                    scanned += 1
+                    // Карта диска: предки глубины 2–3 от домашней
+                    let rel = String(path.dropFirst(home.count + 1))
+                    let comps = rel.split(separator: "/", omittingEmptySubsequences: true)
+                    for depth in 2...3 where comps.count >= depth {
+                        let key = home + "/" + comps.prefix(depth).joined(separator: "/")
+                        meta.folderSizes[key, default: 0] &+= size
+                    }
+                    if size >= 2 * 1024 * 1024 {
+                        meta.large.append(LargeFile(path: path, name: url.lastPathComponent,
+                                                    size: size, access: vals?.contentAccessDate,
+                                                    category: cat))
+                    }
+                    if scanned % 3000 == 0 { progress(scanned, url.lastPathComponent) }
+                }
+                meta.large.sort { $0.size > $1.size }
+                if meta.large.count > 300 { meta.large = Array(meta.large.prefix(300)) }
+                return meta
             }
 
-            while let url = enumerator.nextObject() as? URL {
+            // Верхний уровень домашней папки
+            let homeURL = URL(fileURLWithPath: home)
+            guard let topURLs = try? fm.contentsOfDirectory(at: homeURL,
+                                                            includingPropertiesForKeys: keys) else {
+                return DeepScanResult(byCategory: [:], large: [], dupeCandidates: [],
+                                      topByCategory: [:], topFolders: [],
+                                      topLevel: [:], folderSizes: [:])
+            }
+
+            for url in topURLs {
                 if Task.isCancelled || cancel?.cancelled == true { throw CancellationError() }
                 let path = url.path
-                // Не лезем в Корзину
-                if path.hasPrefix(trashDir) { enumerator.skipDescendants(); continue }
-
+                if path == trashDir || path.hasPrefix(trashDir + "/") { continue }
                 let vals = try? url.resourceValues(forKeys: Set(keys))
-                let isDir = vals?.isDirectory ?? false
 
-                if isDir {
-                    let name = url.lastPathComponent
-                    // .app считаем целиком как «Приложения», внутрь не заходим
-                    if name.hasSuffix(".app") {
-                        let size = duSizeSync(path, cancel: cancel)
-                        byCategory[.apps, default: 0] += size
-                        topByCategory[.apps, default: []].append(
-                            LargeFile(path: path, name: name, size: size, access: nil, category: .apps, isDir: true))
-                        addToAncestors(path, size)
-                        enumerator.skipDescendants()
+                if vals?.isDirectory == true {
+                    let mtime = (vals?.contentModificationDate ?? .distantPast).timeIntervalSince1970
+                    // Инкремент: папка не менялась с прошлого сканирования → берём из кэша
+                    if let cached = cacheMeta?[path], abs(cached.mtime - mtime) < 1.0 {
+                        let stillThere = cached.large.filter { fm.fileExists(atPath: $0.path) }
+                        var reused = cached
+                        reused.large = stillThere
+                        newMeta[path] = reused
+                        merge(path, reused)
+                        progress(scanned, url.lastPathComponent)
                         continue
                     }
-                    // Тяжёлые дев-папки считаем целиком
-                    if name == "node_modules" || name == "DerivedData" {
-                        let size = duSizeSync(path, cancel: cancel)
-                        byCategory[.dev, default: 0] += size
-                        topByCategory[.dev, default: []].append(
-                            LargeFile(path: path, name: name, size: size, access: nil, category: .dev, isDir: true))
-                        addToAncestors(path, size)
-                        enumerator.skipDescendants()
-                        continue
+                    let meta = try scanSubtree(root: url, rootPath: path, mtime: mtime)
+                    newMeta[path] = meta
+                    merge(path, meta)
+                    progress(scanned, url.lastPathComponent)
+                } else {
+                    // Файл прямо в корне домашней папки
+                    let size = UInt64(vals?.totalFileAllocatedSize ?? vals?.fileSize ?? 0)
+                    let cat = classify(path: path, ext: url.pathExtension.lowercased())
+                    byCategory[cat, default: 0] &+= size
+                    topLevelSizes[path] = size
+                    scanned += 1
+                    if size >= 2 * 1024 * 1024 {
+                        let lf = LargeFile(path: path, name: url.lastPathComponent, size: size,
+                                           access: vals?.contentAccessDate, category: cat)
+                        topByCategory[cat, default: []].append(lf)
+                        if size >= 30 * 1024 * 1024 {
+                            dupeCandidates.append(lf)
+                            if size >= 50 * 1024 * 1024 { large.append(lf) }
+                        }
                     }
-                    continue
                 }
-
-                let size = UInt64(vals?.totalFileAllocatedSize ?? vals?.fileSize ?? 0)
-                let ext = url.pathExtension.lowercased()
-                let cat = classify(path: path, ext: ext)
-                byCategory[cat, default: 0] += size
-                scanned += 1
-                addToAncestors(path, size)
-
-                if size >= 2 * 1024 * 1024 { // от 2 МБ — показываем в детализации категории
-                    topByCategory[cat, default: []].append(
-                        LargeFile(path: path, name: url.lastPathComponent, size: size,
-                                  access: vals?.contentAccessDate, category: cat))
-                }
-
-                if size >= 30 * 1024 * 1024 { // от 30 МБ — кандидаты в дубликаты и большие файлы
-                    let lf = LargeFile(path: path, name: url.lastPathComponent, size: size,
-                                       access: vals?.contentAccessDate, category: cat)
-                    dupeCandidates.append(lf)
-                    if size >= 50 * 1024 * 1024 { large.append(lf) }
-                }
-
-                if scanned % 3000 == 0 { progress(scanned, url.lastPathComponent) }
             }
 
             large.sort { $0.size > $1.size }
@@ -654,7 +749,8 @@ enum Scanner {
             return DeepScanResult(byCategory: byCategory, large: large,
                                   dupeCandidates: Array(dupeCandidates.prefix(8000)),
                                   topByCategory: topByCategory, topFolders: Array(topFolders),
-                                  topLevel: topLevelSizes, folderSizes: folderSizes)
+                                  topLevel: topLevelSizes, folderSizes: folderSizes,
+                                  folderMeta: newMeta)
         }.value
     }
 
@@ -842,7 +938,9 @@ enum Scanner {
 
         var orphans: [CleanItem] = []
         let dirs = ["Library/Application Support", "Library/Caches", "Library/Preferences",
-                    "Library/Saved Application State", "Library/HTTPStorages", "Library/Logs"]
+                    "Library/Saved Application State", "Library/HTTPStorages", "Library/Logs",
+                    "Library/Containers", "Library/Group Containers",
+                    "Library/Application Scripts", "Library/LaunchAgents"]
         for rel in dirs {
             let dir = home + "/" + rel
             guard let urls = try? FileManager.default.contentsOfDirectory(
