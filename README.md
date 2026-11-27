@@ -29,20 +29,24 @@
 ## Features
 
 - **Disk Overview** — space usage by category, drill down into the files of each category
+- **Statistics & Smart Suggestions** — total space freed with a weekly chart, plus hints on what to clean first
+- **Incremental Scanning** — rescans only changed folders, dramatically faster
 - **Disk Map** — interactive folder treemap, DaisyDisk-style
 - **Large Files & Heavy Folders** — 50 MB+ files and 100 MB+ folders, with search and sorting
 - **Duplicates** — exact content comparison (SHA-256)
-- **Applications** — uninstall together with leftovers (caches, preferences, containers) + finds "orphans" from long-removed apps
-- **System Junk** — caches, logs, Xcode/DerivedData, package managers, node_modules, project build dirs (dist, .next, target, build, Pods, venv), Docker, iPhone/iPad backups, Mail attachments
+- **Applications** — uninstall with leftovers, reset app data without removing the app, long-unused apps, "orphan" leftovers of removed apps (Application Support, Containers, LaunchAgents and more)
+- **System Junk** — caches and logs, Xcode (DerivedData, simulators, DeviceSupport), package managers (npm, pip, Homebrew, Gradle, Maven, SwiftPM, Cargo, Go), node_modules, project build dirs (dist, .next, target, build, Pods, venv), Docker, iPhone/iPad backups, Mail attachments & caches, crash logs, partial downloads, broken plists, browser history and cookies
+- **Monitor** — CPU, memory, disk, battery, thermal state and network in real time; public IP with country flag (spot an active VPN)
+- **System Extensions** — Quick Look, internet plug-ins, services, preference panes, Spotlight importers
 - **Login Items** — user agents, including broken ones (the app is already gone)
 - **Downloads** — files older than 30 days
 - **Trash** — browse and empty
 - **History** — cleanup log, free-space chart and "what grew since last scan"
-- **Menu Bar** — free disk space always in sight (optional)
+- **Menu Bar** — live metrics panel and a choice of animated icons (trash can, engine rotor, sheep, radiation and more); animation speed follows CPU load and goes easy on the battery
 - **Shortcuts** — "Start scan" and "Empty Trash" actions for Apple Shortcuts and Siri
 - **Auto-updates** — the app downloads new versions from GitHub Releases and installs them itself
 - **Hotkeys** — ⌘1…⌘0 to jump between sections, ⌘F to search
-- Russian and English UI, dark and light themes
+- Russian and English UI; dark, light and auto (follows system) themes
 
 ## Safety
 
