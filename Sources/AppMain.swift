@@ -13,6 +13,7 @@ struct MacCleanerApp: App {
                 .preferredColorScheme(model.colorScheme)
                 .task {
                     model.loadHistory()
+                    model.applyTheme()
                     model.applyDockPolicy()
                     MenuBarController.shared.apply(enabled: model.menuBarEnabled)
                     Task { await UpdateChecker.shared.check(silent: true) }
@@ -247,7 +248,7 @@ struct ThemeSwitcher: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            themeButton(value: "system", icon: "circle.lefthalf.filled", labelKey: "theme.system")
+            themeButton(value: "system", icon: "circle.lefthalf.filled", labelKey: "theme.systemShort")
             themeButton(value: "light", icon: "sun.max", labelKey: "theme.light")
             themeButton(value: "dark", icon: "moon", labelKey: "theme.dark")
         }
@@ -266,9 +267,11 @@ struct ThemeSwitcher: View {
                     .font(.system(size: 11))
                 Text(L10n.shared.t(labelKey))
                     .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .foregroundStyle(active ? .white : .secondary)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 8)

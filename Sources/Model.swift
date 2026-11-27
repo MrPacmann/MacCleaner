@@ -49,6 +49,7 @@ final class L10n {
         "theme.light": "Светлая", "theme.dark": "Тёмная", "theme.system": "Как в системе",
         "apps.unused": "Не открывались 6+ мес: %d · %@",
         "apps.sort.size": "По размеру", "apps.sort.unused": "Давно не открывались",
+        "theme.systemShort": "Авто",
         "access.recent": "открывался недавно",
         "settings.appearance": "Оформление", "settings.theme": "Тема интерфейса",
         "settings.language": "Язык интерфейса",
@@ -287,6 +288,7 @@ final class L10n {
         "theme.light": "Light", "theme.dark": "Dark", "theme.system": "System",
         "apps.unused": "Unused for 6+ mo: %d · %@",
         "apps.sort.size": "By size", "apps.sort.unused": "Longest unused",
+        "theme.systemShort": "Auto",
         "access.recent": "opened recently",
         "settings.appearance": "Appearance", "settings.theme": "Interface theme",
         "settings.language": "Interface language",
@@ -880,6 +882,17 @@ final class CleanerViewModel {
     var theme: String = UserDefaults.standard.string(forKey: "appTheme") ?? "system" {
         didSet {
             UserDefaults.standard.set(theme, forKey: "appTheme")
+            applyTheme()
+        }
+    }
+
+    /// Тема через AppKit: appearance = nil надёжно следует за системой и
+    /// обновляется живьём, в отличие от preferredColorScheme(nil)
+    func applyTheme() {
+        switch theme {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
         }
     }
 
