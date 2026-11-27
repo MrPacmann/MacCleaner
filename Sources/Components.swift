@@ -238,6 +238,29 @@ struct SelectableRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isSelected ? Theme.accent.opacity(0.45) : Theme.stroke, lineWidth: 1)
         )
+        // Правый клик по строке: Finder, копировать путь, выбрать/снять
+        .contextMenu {
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            } label: {
+                Label(L10n.shared.t("ctx.showInFinder"), systemImage: "folder")
+            }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+            } label: {
+                Label(L10n.shared.t("ctx.copyPath"), systemImage: "doc.on.doc")
+            }
+            if selectable {
+                Divider()
+                Button {
+                    model.toggle(path, !isSelected)
+                } label: {
+                    Label(L10n.shared.t(isSelected ? "ctx.deselect" : "ctx.select"),
+                          systemImage: isSelected ? "checkmark.circle.fill" : "circle")
+                }
+            }
+        }
     }
 }
 
