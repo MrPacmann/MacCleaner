@@ -10,7 +10,6 @@ struct MacCleanerApp: App {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
-                .preferredColorScheme(model.colorScheme)
                 .task {
                     model.loadHistory()
                     model.applyTheme()

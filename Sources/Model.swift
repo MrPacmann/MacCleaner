@@ -886,13 +886,19 @@ final class CleanerViewModel {
         }
     }
 
-    /// Тема через AppKit: appearance = nil надёжно следует за системой и
-    /// обновляется живьём, в отличие от preferredColorScheme(nil)
+    /// Тема через AppKit: appearance = nil следует за системой.
+    /// Прогоняем по всем окнам вручную — иначе macOS применяет лениво,
+    /// только при переключении фокуса между приложениями.
     func applyTheme() {
+        let appearance: NSAppearance?
         switch theme {
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        default: NSApp.appearance = nil
+        case "light": appearance = NSAppearance(named: .aqua)
+        case "dark": appearance = NSAppearance(named: .darkAqua)
+        default: appearance = nil
+        }
+        NSApp.appearance = appearance
+        for window in NSApp.windows {
+            window.appearance = appearance
         }
     }
 
@@ -935,14 +941,7 @@ final class CleanerViewModel {
         }
     }
 
-    /// nil = как в системе (preferredColorScheme(nil) следует за macOS)
-    var colorScheme: ColorScheme? {
-        switch theme {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
-    }
+    // Тема применяется через applyTheme() (NSApp.appearance) — preferredColorScheme не используем
 
     // Системный мусор (категории из первой версии)
     var categories: [CategoryState] = [
