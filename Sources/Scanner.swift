@@ -754,7 +754,11 @@ enum Scanner {
             if bundleID.hasPrefix("com.apple.") { return nil }
             let size = await duSize(url.path)
             let icon = NSWorkspace.shared.icon(forFile: url.path)
-            return AppEntry(url: url, name: name, bundleID: bundleID, size: size, icon: icon)
+            // Когда приложение запускали в последний раз (данные Spotlight)
+            let lastUsed = (NSMetadataItem(url: url)?.value(forAttribute: "kMDItemLastUsedDate") as? Date)
+                ?? (try? url.resourceValues(forKeys: [.contentAccessDateKey]))?.contentAccessDate
+            return AppEntry(url: url, name: name, bundleID: bundleID, size: size, icon: icon,
+                            lastUsed: lastUsed)
         }
         return apps.sorted { $0.size > $1.size }
     }

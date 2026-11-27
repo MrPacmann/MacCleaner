@@ -46,7 +46,9 @@ final class L10n {
         "btn.selectAll": "Выбрать все", "btn.deselect": "Снять выбор",
         "btn.delete": "Удалить выбранное", "btn.cancel": "Отмена",
         "misc.selected": "Выбрано", "misc.toTrashNote": "Файлы сначала попадут в Корзину",
-        "theme.light": "Светлая", "theme.dark": "Тёмная",
+        "theme.light": "Светлая", "theme.dark": "Тёмная", "theme.system": "Как в системе",
+        "apps.unused": "Не открывались 6+ мес: %d · %@",
+        "apps.sort.size": "По размеру", "apps.sort.unused": "Давно не открывались",
         "access.recent": "открывался недавно",
         "settings.appearance": "Оформление", "settings.theme": "Тема интерфейса",
         "settings.language": "Язык интерфейса",
@@ -282,7 +284,9 @@ final class L10n {
         "btn.selectAll": "Select all", "btn.deselect": "Deselect",
         "btn.delete": "Delete selected", "btn.cancel": "Cancel",
         "misc.selected": "Selected", "misc.toTrashNote": "Files go to the Trash first",
-        "theme.light": "Light", "theme.dark": "Dark",
+        "theme.light": "Light", "theme.dark": "Dark", "theme.system": "System",
+        "apps.unused": "Unused for 6+ mo: %d · %@",
+        "apps.sort.size": "By size", "apps.sort.unused": "Longest unused",
         "access.recent": "opened recently",
         "settings.appearance": "Appearance", "settings.theme": "Interface theme",
         "settings.language": "Interface language",
@@ -662,9 +666,33 @@ struct AppEntry: Identifiable, Hashable {
     let bundleID: String
     let size: UInt64
     var icon: NSImage? = nil
+    /// Дата последнего запуска (Spotlight kMDItemLastUsedDate, fallback — access time)
+    var lastUsed: Date? = nil
 
     func hash(into hasher: inout Hasher) { hasher.combine(url) }
     static func == (a: AppEntry, b: AppEntry) -> Bool { a.url == b.url }
+
+    /// Сколько месяцев приложение не открывали (0 — открывали недавно или нет данных)
+    var monthsUnused: Int {
+        guard let lastUsed else { return 0 }
+        return Calendar.current.dateComponents([.month], from: lastUsed, to: Date()).month ?? 0
+    }
+
+    /// «не открывалось N мес.» — подсказка в списке
+    var lastUsedNote: String? {
+        let months = monthsUnused
+        guard months >= 1 else { return nil }
+        if L10n.shared.lang == "en" {
+            if months < 12 { return "not opened for \(months) mo." }
+            return "not opened for \(months / 12) yr."
+        }
+        if months < 12 { return "не открывалось \(months) мес." }
+        let years = months / 12
+        return "не открывалось \(years) " + (years == 1 ? "год" : years < 5 ? "года" : "лет")
+    }
+
+    /// «Пыльное» приложение: полгода и больше без запуска
+    var isStale: Bool { monthsUnused >= 6 }
 }
 
 @Observable
@@ -848,8 +876,8 @@ final class CleanerViewModel {
     /// Открытая категория детализации в «Обзоре диска» (nil — обычный обзор)
     var drillCategory: FileCategory? = nil
 
-    /// Тема оформления: "light" | "dark" (хранится в UserDefaults)
-    var theme: String = UserDefaults.standard.string(forKey: "appTheme") ?? "dark" {
+    /// Тема оформления: "system" | "light" | "dark" (хранится в UserDefaults)
+    var theme: String = UserDefaults.standard.string(forKey: "appTheme") ?? "system" {
         didSet {
             UserDefaults.standard.set(theme, forKey: "appTheme")
         }
@@ -894,7 +922,14 @@ final class CleanerViewModel {
         }
     }
 
-    var colorScheme: ColorScheme { theme == "light" ? .light : .dark }
+    /// nil = как в системе (preferredColorScheme(nil) следует за macOS)
+    var colorScheme: ColorScheme? {
+        switch theme {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
 
     // Системный мусор (категории из первой версии)
     var categories: [CategoryState] = [

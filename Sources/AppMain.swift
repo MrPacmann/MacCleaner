@@ -247,6 +247,7 @@ struct ThemeSwitcher: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            themeButton(value: "system", icon: "circle.lefthalf.filled", labelKey: "theme.system")
             themeButton(value: "light", icon: "sun.max", labelKey: "theme.light")
             themeButton(value: "dark", icon: "moon", labelKey: "theme.dark")
         }

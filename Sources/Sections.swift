@@ -781,6 +781,17 @@ extension Array where Element == String {
 
 struct AppsView: View {
     @Environment(CleanerViewModel.self) private var model
+    @State private var sortByUnused = false
+
+    /// Отсортированный список: по размеру или по давности последнего запуска
+    var apps: [AppEntry] {
+        sortByUnused
+            ? model.appsState.apps.sorted { ($0.lastUsed ?? .distantPast) < ($1.lastUsed ?? .distantPast) }
+            : model.appsState.apps
+    }
+
+    /// «Пыльные» приложения: 6+ месяцев без запуска
+    var stale: [AppEntry] { model.appsState.apps.filter(\.isStale) }
 
     var body: some View {
         ScrollView {
@@ -801,12 +812,26 @@ struct AppsView: View {
                         EmptyState(icon: "square.grid.2x2", iconColor: Theme.accent, title: L10n.shared.t("apps.none"))
                     } else {
                         HStack {
-                            Text(L10n.shared.f("apps.count", model.appsState.apps.count, Format.bytes(model.appsState.apps.reduce(0) { $0 + $1.size })))
-                                .font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(L10n.shared.f("apps.count", model.appsState.apps.count, Format.bytes(model.appsState.apps.reduce(0) { $0 + $1.size })))
+                                    .font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                                if !stale.isEmpty {
+                                    Text(L10n.shared.f("apps.unused", stale.count,
+                                                       Format.bytes(stale.reduce(0) { $0 + $1.size })))
+                                        .font(.caption)
+                                        .foregroundStyle(Color.orange)
+                                }
+                            }
                             Spacer()
+                            Picker("", selection: $sortByUnused) {
+                                Text(L10n.shared.t("apps.sort.size")).tag(false)
+                                Text(L10n.shared.t("apps.sort.unused")).tag(true)
+                            }
+                            .labelsHidden()
+                            .frame(width: 200)
                         }
                         LazyVStack(spacing: 8) {
-                            ForEach(model.appsState.apps) { app in
+                            ForEach(apps) { app in
                                 AppRow(app: app)
                             }
                         }
@@ -846,6 +871,11 @@ struct AppRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).font(.callout.weight(.medium))
                 Text(app.url.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let note = app.lastUsedNote {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(app.isStale ? Color.orange : Color.secondary)
+                }
             }
             Spacer()
             Text(Format.bytes(app.size))
